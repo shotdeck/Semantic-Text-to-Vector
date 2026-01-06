@@ -3,6 +3,14 @@
   "WorkspaceRootPath": "D:\\shotdeck\\Code\\Semantic Text to Vector\\Semantic Text to Vector\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{FF19650F-A495-419B-9026-C3FFDA0CF252}|Semantic Text to Vector\\Semantic Text to Vector.csproj|d:\\shotdeck\\code\\semantic text to vector\\semantic text to vector\\semantic text to vector\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{FF19650F-A495-419B-9026-C3FFDA0CF252}|Semantic Text to Vector\\Semantic Text to Vector.csproj|solutionrelative:semantic text to vector\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{FF19650F-A495-419B-9026-C3FFDA0CF252}|Semantic Text to Vector\\Semantic Text to Vector.csproj|d:\\shotdeck\\code\\semantic text to vector\\semantic text to vector\\semantic text to vector\\appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}",
+      "RelativeMoniker": "D:0:0:{FF19650F-A495-419B-9026-C3FFDA0CF252}|Semantic Text to Vector\\Semantic Text to Vector.csproj|solutionrelative:semantic text to vector\\appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{FF19650F-A495-419B-9026-C3FFDA0CF252}|Semantic Text to Vector\\Semantic Text to Vector.csproj|d:\\shotdeck\\code\\semantic text to vector\\semantic text to vector\\semantic text to vector\\controllers\\weatherforecastcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{FF19650F-A495-419B-9026-C3FFDA0CF252}|Semantic Text to Vector\\Semantic Text to Vector.csproj|solutionrelative:semantic text to vector\\controllers\\weatherforecastcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
@@ -14,15 +22,41 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": 0,
           "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Program.cs",
+              "DocumentMoniker": "D:\\shotdeck\\Code\\Semantic Text to Vector\\Semantic Text to Vector\\Semantic Text to Vector\\Program.cs",
+              "RelativeDocumentMoniker": "Semantic Text to Vector\\Program.cs",
+              "ToolTip": "D:\\shotdeck\\Code\\Semantic Text to Vector\\Semantic Text to Vector\\Semantic Text to Vector\\Program.cs*",
+              "RelativeToolTip": "Semantic Text to Vector\\Program.cs*",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABkAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-01-06T17:43:02.22Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "appsettings.json",
+              "DocumentMoniker": "D:\\shotdeck\\Code\\Semantic Text to Vector\\Semantic Text to Vector\\Semantic Text to Vector\\appsettings.json",
+              "RelativeDocumentMoniker": "Semantic Text to Vector\\appsettings.json",
+              "ToolTip": "D:\\shotdeck\\Code\\Semantic Text to Vector\\Semantic Text to Vector\\Semantic Text to Vector\\appsettings.json",
+              "RelativeToolTip": "Semantic Text to Vector\\appsettings.json",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
+              "WhenOpened": "2026-01-06T17:42:59.811Z",
+              "EditorCaption": ""
+            },
             {
               "$type": "Bookmark",
               "Name": "ST:0:0:{cce594b6-0c39-4442-ba28-10c64ac7e89f}"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 2,
               "Title": "WeatherForecastController.cs",
               "DocumentMoniker": "D:\\shotdeck\\Code\\Semantic Text to Vector\\Semantic Text to Vector\\Semantic Text to Vector\\Controllers\\WeatherForecastController.cs",
               "RelativeDocumentMoniker": "Semantic Text to Vector\\Controllers\\WeatherForecastController.cs",
