@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Semantic Text to Vector")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+3be478083e8a11243b6927f441f02702d622bd8a")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+759d0438ce08f42a30677599217a0eba70752a1f")]
 [assembly: System.Reflection.AssemblyProductAttribute("Semantic Text to Vector")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Semantic Text to Vector")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
