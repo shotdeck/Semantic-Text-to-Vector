@@ -581,8 +581,16 @@ namespace ShotDeck.Keywords
             Console.WriteLine($"Exclusions applied by category: {excludedByCat.Sum(kv => kv.Value.Count)} pair(s)");
             if (_keywordsByCategory.Count > 0) newByCategory = new Dictionary<string,
             List<string>>(_keywordsByCategory, StringComparer.OrdinalIgnoreCase);
-            var synonymToMaster = await FetchSynonymToMasterMap(conn);
-            Console.WriteLine($"[KeywordCache] Synonyms loaded: {synonymToMaster.Count}");
+            var (synonymToMaster, allMasterTerms) = await FetchSynonymToMasterMapAndMasters(conn);
+            Console.WriteLine($"[KeywordCache] Synonyms loaded: {synonymToMaster.Count}, Master terms loaded: {allMasterTerms.Count}");
+            
+            // Add all master terms to the keyword set so they are searchable
+            foreach (var master in allMasterTerms)
+            {
+                if (string.IsNullOrWhiteSpace(master)) continue;
+                AddKeywordLocal(master, $"synonym_master");
+            }
+            
             foreach (var kv in synonymToMaster)
             {
                 var synonym = kv.Key;
@@ -604,16 +612,29 @@ namespace ShotDeck.Keywords
             PublishStatus();
             Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}");
         }
-        private static async Task<Dictionary<string,
-        string>> FetchSynonymToMasterMap(NpgsqlConnection conn)
+        private static async Task<(Dictionary<string, string> SynonymToMaster, HashSet<string> AllMasterTerms)> FetchSynonymToMasterMapAndMasters(NpgsqlConnection conn)
         {
-            var map = new Dictionary<string,
-            string>(StringComparer.OrdinalIgnoreCase);
-            const string sql = @" SELECT m.master_term, s.synonym_term FROM frl.frl_keywords_synonyms_master m JOIN frl.frl_keywords_synonyms s ON s.master_id = m.id;";
-            using
-            var cmd = new NpgsqlCommand(sql, conn);
-            using
-            var reader = await cmd.ExecuteReaderAsync();
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var allMasters = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            
+            // First, fetch all master terms (including those without synonyms)
+            const string masterSql = @"SELECT master_term FROM frl.frl_keywords_synonyms_master WHERE is_included = true;";
+            using (var masterCmd = new NpgsqlCommand(masterSql, conn))
+            using (var masterReader = await masterCmd.ExecuteReaderAsync())
+            {
+                while (await masterReader.ReadAsync())
+                {
+                    if (masterReader.IsDBNull(0)) continue;
+                    var master = masterReader.GetString(0)?.Trim();
+                    if (!string.IsNullOrWhiteSpace(master))
+                        allMasters.Add(master);
+                }
+            }
+            
+            // Then, fetch synonym-to-master mappings
+            const string sql = @"SELECT m.master_term, s.synonym_term FROM frl.frl_keywords_synonyms_master m JOIN frl.frl_keywords_synonyms s ON s.master_id = m.id WHERE m.is_included = true AND s.is_included = true;";
+            using var cmd = new NpgsqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
                 if (reader.IsDBNull(0) || reader.IsDBNull(1)) continue;
@@ -622,7 +643,7 @@ namespace ShotDeck.Keywords
                 if (string.IsNullOrWhiteSpace(master) || string.IsNullOrWhiteSpace(syn)) continue;
                 map[syn] = master;
             }
-            return map;
+            return (map, allMasters);
         }
         private bool TryWarmFromCsv(out KeywordSnapshot snapshot)
         {
