@@ -1,6 +1,0 @@
-@Semantic_Text_to_Vector_HostAddress = http://localhost:5216
-
-GET {{Semantic_Text_to_Vector_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###
