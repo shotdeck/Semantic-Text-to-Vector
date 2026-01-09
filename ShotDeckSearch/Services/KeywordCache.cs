@@ -558,7 +558,6 @@ namespace ShotDeck.Keywords
             await AddTagsToSet("frl_join_images_color", "color", "color");
             await AddTagsToSet("frl_join_images_shot_type", "shot_type", "shot_type");
             await AddTagsToSet("frl_join_images_lighting", "lighting", "lighting");
-            await AddTagsToSet("frl_keywords", "keyword", "keywords");
             foreach (var s in new[] {
         "Ultra Wide / Fisheye",
         "Wide",
@@ -576,9 +575,6 @@ namespace ShotDeck.Keywords
       }) AddKeywordLocal(s, "composition");
             await AddImagesTagsToSet();
             await AddMoviesTagsToSet();
-            var excludedByCat = await FetchExcludedKeywordsByCategory(conn);
-            ApplyExclusionsToSourcesOnly(newSources, excludedByCat);
-            Console.WriteLine($"Exclusions applied by category: {excludedByCat.Sum(kv => kv.Value.Count)} pair(s)");
             if (_keywordsByCategory.Count > 0) newByCategory = new Dictionary<string,
             List<string>>(_keywordsByCategory, StringComparer.OrdinalIgnoreCase);
             var (synonymToMaster, allMasterTerms) = await FetchSynonymToMasterMapAndMasters(conn);
@@ -853,76 +849,10 @@ namespace ShotDeck.Keywords
             }
             return result;
         }
-        private static void ApplyExclusionsToSourcesOnly(Dictionary<string, HashSet<string>> keywordSources, Dictionary<string, HashSet<string>> excludedByCategory)
-        {
-            static string MapSourceToCategoryLocal(string s)
-            {
-                s = s?.Trim() ?? "";
-                return s
-                switch
-                {
-                    "shot_type" => "Shot Type",
-                    "lighting_type" => "Lighting Type",
-                    "lighting" => "Lighting",
-                    "time_of_day" => "Time of Day",
-                    "vfx_backing" => "VFX Backing",
-                    "color" => "Color",
-                    "lens size" => "Lens Size",
-                    "composition" => "Composition",
-                    "actors" => "Actors",
-                    "int_ext" => "Interior/Exterior",
-                    "aspect_ratio" => "Aspect Ratio",
-                    _ when s.StartsWith("movie:", StringComparison.OrdinalIgnoreCase) => MapSourceToCategoryLocal(s.Substring("movie:".Length)),
-                    _ when s.StartsWith("image:", StringComparison.OrdinalIgnoreCase) => MapSourceToCategoryLocal(s.Substring("image:".Length)),
-                    "title" => "Title",
-                    "media_type" => "Media Type",
-                    _ => s
-                };
-            }
-            if (excludedByCategory.Count == 0 || keywordSources.Count == 0) return;
-            foreach (var (category, excludedKeywords) in excludedByCategory)
-            {
-                foreach (var kw in excludedKeywords)
-                {
-                    if (!keywordSources.TryGetValue(kw, out
-                    var sources) || sources is null || sources.Count == 0) continue;
-                    var toRemove = new List<string>();
-                    foreach (var src in sources)
-                    {
-                        var cat = MapSourceToCategoryLocal(src);
-                        if (cat.Equals(category, StringComparison.OrdinalIgnoreCase)) toRemove.Add(src);
-                    }
-                    foreach (var src in toRemove) sources.Remove(src);
-                }
-            }
-        }
-        private static async Task<Dictionary<string,
-        HashSet<string>>> FetchExcludedKeywordsByCategory(NpgsqlConnection conn)
-        {
-            var result = new Dictionary<string,
-            HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-            const string sql = @" SELECT k.keyword, c.name AS category_name FROM frl_keywords k JOIN frl_keyword_categories c ON c.id = k.category_id WHERE k.is_included = false;";
-            using
-            var cmd = new NpgsqlCommand(sql, conn);
-            using
-            var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                if (reader.IsDBNull(0) || reader.IsDBNull(1)) continue;
-                var keyword = reader.GetString(0)?.Trim();
-                var category = reader.GetString(1)?.Trim();
-                if (string.IsNullOrWhiteSpace(keyword) || string.IsNullOrWhiteSpace(category)) continue;
-                if (!result.TryGetValue(category, out
-                var set)) result[category] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                set.Add(keyword);
-            }
-            return result;
-        }
         private static async Task<List<string>> FetchTags(NpgsqlConnection conn, string tableName, string columnName)
         {
             var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             string sql = $"SELECT DISTINCT {columnName} FROM {tableName}";
-            if (tableName == "frl_keywords") sql += " WHERE is_included = true ORDER BY keyword";
             using
             var cmd = new NpgsqlCommand(sql, conn);
             using
