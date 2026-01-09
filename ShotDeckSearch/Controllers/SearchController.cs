@@ -295,6 +295,7 @@ namespace ShotDeckSearch.Controllers
                     }
                 }
 
+
                 // 3) Canonicalize include/exclude for output
                 List<string> CanonicalizeList(IEnumerable<string> list) =>
                     list.Select(k => _keywordCache.Canonicalize(k))
