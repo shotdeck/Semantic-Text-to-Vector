@@ -367,7 +367,34 @@ namespace ShotDeckSearch.Controllers
                     foreach (var src in sources)
                     {
                         if (src.StartsWith("synonym:", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (src.Equals("synonym_master", StringComparison.OrdinalIgnoreCase)) continue;
                         catSet.Add(MapSourceLabelToCategory(src));
+                    }
+
+                    // If the canonical term only has "synonym_master" source (pure synonym master),
+                    // also look up sources from its synonyms to derive categories
+                    if (catSet.Count == 0)
+                    {
+                        var syns = _keywordCache.GetSynonymsForMaster(key);
+                        foreach (var syn in syns)
+                        {
+                            if (string.IsNullOrWhiteSpace(syn)) continue;
+                            var synSources = _keywordCache.GetSourcesFor(syn);
+                            foreach (var src in synSources)
+                            {
+                                // Skip the synonym:master reference itself
+                                if (src.StartsWith("synonym:", StringComparison.OrdinalIgnoreCase)) continue;
+                                if (src.Equals("synonym_master", StringComparison.OrdinalIgnoreCase)) continue;
+                                catSet.Add(MapSourceLabelToCategory(src));
+                            }
+                        }
+                    }
+
+                    // If still no categories but this is a valid synonym master, add a default "Keywords" category
+                    // so the keyword is not filtered out
+                    if (catSet.Count == 0 && sources.Any(s => s.Equals("synonym_master", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        catSet.Add("Keywords");
                     }
 
                     // -----------------------------------------
