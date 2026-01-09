@@ -449,9 +449,21 @@ namespace ShotDeckSearch.Controllers
                     // -----------------------------------------
                     // 4) Title filtering (existing logic)
                     // -----------------------------------------
+                    bool isSynonymMaster = sources.Any(s => s.Equals("synonym_master", StringComparison.OrdinalIgnoreCase));
+                    bool hadTitleFromSources = sources.Any(s =>
+                        s.Equals("movie:title", StringComparison.OrdinalIgnoreCase) ||
+                        s.Equals("title", StringComparison.OrdinalIgnoreCase));
+
                     if (catSet.Contains("Title"))
                     {
-                        if (!wantTitle || !isNearestTitle)
+                        // Don't filter out Title for synonym masters that have Title as their source
+                        // This ensures movie title synonyms are returned even without a title cue
+                        if (isSynonymMaster && hadTitleFromSources)
+                        {
+                            // Keep Title category for synonym masters with title source
+                            ApplyTitleFilter(catSet, keepTitle: true);
+                        }
+                        else if (!wantTitle || !isNearestTitle)
                             ApplyTitleFilter(catSet, keepTitle: false);
                         else
                             ApplyTitleFilter(catSet, keepTitle: true);
