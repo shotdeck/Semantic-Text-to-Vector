@@ -31,7 +31,7 @@ namespace ShotDeckSearch.Controllers
         private readonly NpgsqlConnection _connection;
         private readonly IConfiguration _configuration;
         private readonly IKeywordCacheService _keywordCache;
-        private readonly ILogger<KeywordsAdminController> _logger;
+        private readonly ILogger<SearchController> _logger;
 
         private sealed record KeywordResult(string Keyword, List<string> Categories);
 
@@ -39,7 +39,7 @@ namespace ShotDeckSearch.Controllers
             NpgsqlConnection connection,
             IConfiguration configuration,
             IKeywordCacheService keywordCache,
-            ILogger<KeywordsAdminController> logger)
+            ILogger<SearchController> logger)
         {
             _connection = connection;
             _configuration = configuration;
