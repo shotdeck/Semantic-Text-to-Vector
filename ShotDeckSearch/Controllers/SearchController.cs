@@ -438,103 +438,101 @@ namespace ShotDeckSearch.Controllers
                                           nearestTitleKeyword.Equals(key, StringComparison.OrdinalIgnoreCase);
 
                     // -----------------------------------------
-                    // 3) Apply PERSON / CREW intent filtering
-                    // (director suppresses cinematographer, etc.)
-                    // -----------------------------------------
-                    if (wantDirector || wantActing || wantCine || wantProd || wantCostume)
-                    {
-                        ApplyIntentFilter(catSet, wantDirector, wantActing, wantCine, wantProd, wantCostume);
-                    }
-
-                    // -----------------------------------------
-                    // 4) Title filtering (existing logic)
+                    // 3) Check if this is a synonym master - skip all filtering if so
+                    // Synonym masters should always be returned with their categories
                     // -----------------------------------------
                     bool isSynonymMaster = sources.Any(s => s.Equals("synonym_master", StringComparison.OrdinalIgnoreCase));
-                    bool hadTitleFromSources = sources.Any(s =>
-                        s.Equals("movie:title", StringComparison.OrdinalIgnoreCase) ||
-                        s.Equals("title", StringComparison.OrdinalIgnoreCase));
 
-                    if (catSet.Contains("Title"))
+                    // Skip all filtering for synonym masters - they should always be returned
+                    if (!isSynonymMaster)
                     {
-                        // Don't filter out Title for synonym masters that have Title as their source
-                        // This ensures movie title synonyms are returned even without a title cue
-                        if (isSynonymMaster && hadTitleFromSources)
+                        // -----------------------------------------
+                        // 3a) Apply PERSON / CREW intent filtering
+                        // (director suppresses cinematographer, etc.)
+                        // -----------------------------------------
+                        if (wantDirector || wantActing || wantCine || wantProd || wantCostume)
                         {
-                            // Keep Title category for synonym masters with title source
-                            ApplyTitleFilter(catSet, keepTitle: true);
+                            ApplyIntentFilter(catSet, wantDirector, wantActing, wantCine, wantProd, wantCostume);
                         }
-                        else if (!wantTitle || !isNearestTitle)
-                            ApplyTitleFilter(catSet, keepTitle: false);
-                        else
-                            ApplyTitleFilter(catSet, keepTitle: true);
-                    }
 
-                    // -----------------------------------------
-                    // 5) Ignore single-word PERSON names unless cued
-                    // ("a kid holding a balloon")
-                    // -----------------------------------------
-                    if (IsSingleWordName(key))
-                    {
-                        bool hasPersonBucket = catSet.Any(c =>
-                            c.Equals("Director", StringComparison.OrdinalIgnoreCase) ||
-                            c.Equals("Actors", StringComparison.OrdinalIgnoreCase) ||
-                            c.Equals("Actor", StringComparison.OrdinalIgnoreCase) ||
-                            c.Equals("Cast", StringComparison.OrdinalIgnoreCase) ||
-                            c.IndexOf("actor", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            c.IndexOf("cast", StringComparison.OrdinalIgnoreCase) >= 0);
-
-                        if (hasPersonBucket && !(wantDirector || wantActing || wantCine || wantProd || wantCostume))
+                        // -----------------------------------------
+                        // 3b) Title filtering (existing logic)
+                        // -----------------------------------------
+                        if (catSet.Contains("Title"))
                         {
-                            var toRemove = catSet
-                                .Where(c =>
-                                    c.Equals("Director", StringComparison.OrdinalIgnoreCase) ||
-                                    c.Equals("Actors", StringComparison.OrdinalIgnoreCase) ||
-                                    c.Equals("Actor", StringComparison.OrdinalIgnoreCase) ||
-                                    c.Equals("Cast", StringComparison.OrdinalIgnoreCase) ||
-                                    c.IndexOf("actor", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                                    c.IndexOf("cast", StringComparison.OrdinalIgnoreCase) >= 0)
-                                .ToList();
-
-                            foreach (var c in toRemove)
-                                catSet.Remove(c);
+                            if (!wantTitle || !isNearestTitle)
+                                ApplyTitleFilter(catSet, keepTitle: false);
+                            else
+                                ApplyTitleFilter(catSet, keepTitle: true);
                         }
-                    }
 
-                    // -----------------------------------------
-                    // 6) Ignore single-word mv_artist / comm_brand
-                    // unless used as a TITLE
-                    // ("a ghost on a beach")
-                    // -----------------------------------------
-                    if (IsSingleWordName(key))
-                    {
-                        bool hasAmbiguousNameBucket = catSet.Any(c =>
-                            c.Equals("mv_artist", StringComparison.OrdinalIgnoreCase) ||
-                            c.Equals("Music Video Artist", StringComparison.OrdinalIgnoreCase) ||
-                            c.Equals("comm_brand", StringComparison.OrdinalIgnoreCase) ||
-                            c.Equals("Commercial Brand", StringComparison.OrdinalIgnoreCase));
-
-                        if (hasAmbiguousNameBucket)
+                        // -----------------------------------------
+                        // 3c) Ignore single-word PERSON names unless cued
+                        // ("a kid holding a balloon")
+                        // -----------------------------------------
+                        if (IsSingleWordName(key))
                         {
-                            bool keepBecauseTitle = wantTitle && isNearestTitle;
+                            bool hasPersonBucket = catSet.Any(c =>
+                                c.Equals("Director", StringComparison.OrdinalIgnoreCase) ||
+                                c.Equals("Actors", StringComparison.OrdinalIgnoreCase) ||
+                                c.Equals("Actor", StringComparison.OrdinalIgnoreCase) ||
+                                c.Equals("Cast", StringComparison.OrdinalIgnoreCase) ||
+                                c.IndexOf("actor", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                c.IndexOf("cast", StringComparison.OrdinalIgnoreCase) >= 0);
 
-                            if (!keepBecauseTitle)
+                            if (hasPersonBucket && !(wantDirector || wantActing || wantCine || wantProd || wantCostume))
                             {
                                 var toRemove = catSet
                                     .Where(c =>
-                                        c.Equals("mv_artist", StringComparison.OrdinalIgnoreCase) ||
-                                        c.Equals("Music Video Artist", StringComparison.OrdinalIgnoreCase) ||
-                                        c.Equals("comm_brand", StringComparison.OrdinalIgnoreCase) ||
-                                        c.Equals("Commercial Brand", StringComparison.OrdinalIgnoreCase))
+                                        c.Equals("Director", StringComparison.OrdinalIgnoreCase) ||
+                                        c.Equals("Actors", StringComparison.OrdinalIgnoreCase) ||
+                                        c.Equals("Actor", StringComparison.OrdinalIgnoreCase) ||
+                                        c.Equals("Cast", StringComparison.OrdinalIgnoreCase) ||
+                                        c.IndexOf("actor", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                        c.IndexOf("cast", StringComparison.OrdinalIgnoreCase) >= 0)
                                     .ToList();
 
                                 foreach (var c in toRemove)
                                     catSet.Remove(c);
                             }
                         }
+
+                        // -----------------------------------------
+                        // 3d) Ignore single-word mv_artist / comm_brand
+                        // unless used as a TITLE
+                        // ("a ghost on a beach")
+                        // -----------------------------------------
+                        if (IsSingleWordName(key))
+                        {
+                            bool hasAmbiguousNameBucket = catSet.Any(c =>
+                                c.Equals("mv_artist", StringComparison.OrdinalIgnoreCase) ||
+                                c.Equals("Music Video Artist", StringComparison.OrdinalIgnoreCase) ||
+                                c.Equals("comm_brand", StringComparison.OrdinalIgnoreCase) ||
+                                c.Equals("Commercial Brand", StringComparison.OrdinalIgnoreCase));
+
+                            if (hasAmbiguousNameBucket)
+                            {
+                                bool keepBecauseTitle = wantTitle && isNearestTitle;
+
+                                if (!keepBecauseTitle)
+                                {
+                                    var toRemove = catSet
+                                        .Where(c =>
+                                            c.Equals("mv_artist", StringComparison.OrdinalIgnoreCase) ||
+                                            c.Equals("Music Video Artist", StringComparison.OrdinalIgnoreCase) ||
+                                            c.Equals("comm_brand", StringComparison.OrdinalIgnoreCase) ||
+                                            c.Equals("Commercial Brand", StringComparison.OrdinalIgnoreCase))
+                                        .ToList();
+
+                                    foreach (var c in toRemove)
+                                        catSet.Remove(c);
+                                }
+                            }
+                        }
                     }
 
                     // -----------------------------------------
-                    // 7) Final output
+                    // 4) Final output
                     // -----------------------------------------
                     if (catSet.Count == 0) return null;
 
