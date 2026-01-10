@@ -223,9 +223,13 @@ namespace ShotDeckSearch.Controllers
                 }
 
                 prompt = prompt
-                    .Replace("\"", "")
-                    .Replace(""", "")
-                    .Replace(""", "");
+     .Replace("\"", "")
+     .Replace("'", "")
+     .Replace("“", "")
+     .Replace("”", "")
+     .Replace("‘", "")
+     .Replace("’", "");
+
 
                 var rawPrompt = prompt;
 
@@ -240,7 +244,7 @@ namespace ShotDeckSearch.Controllers
                     {
                         include = Array.Empty<object>(),
                         exclude = Array.Empty<object>(),
-                        search = string.Empty,
+                        search = prompt,
                         rejectedForCensorship = true,
                         superBlackList = censorshipResult.SuperBlackList
                     });
