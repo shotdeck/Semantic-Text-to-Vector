@@ -31,11 +31,8 @@ builder.Services.AddScoped<NpgsqlConnection>(sp =>
     return conn;
 });
 
-// Keyword caching (singleton)
+// Keyword caching (singleton) - also includes unwanted words caching
 builder.Services.AddSingleton<IKeywordCacheService, KeywordCacheService>();
-
-// Unwanted words caching (singleton)
-builder.Services.AddSingleton<IUnwantedWordsCacheService, UnwantedWordsCacheService>();
 
 builder.Services.AddHttpClient();
 
