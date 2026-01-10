@@ -216,16 +216,35 @@ namespace ShotDeckSearch.Controllers
                     {
                         include = Array.Empty<object>(),
                         exclude = Array.Empty<object>(),
-                        search = string.Empty
+                        search = string.Empty,
+                        rejectedForCensorship = false,
+                        superBlackList = false
                     });
                 }
 
                 prompt = prompt
                     .Replace("\"", "")
-                    .Replace("“", "")
-                    .Replace("”", "");
+                    .Replace(""", "")
+                    .Replace(""", "");
 
                 var rawPrompt = prompt;
+
+                var censorshipResult = _keywordCache.CheckCensorship(rawPrompt);
+                if (censorshipResult.RejectedForCensorship)
+                {
+                    _logger.LogWarning(
+                        "EKAC censorship rejection: prompt='{prompt}', matchedWord='{matchedWord}', superBlackList={superBlackList}",
+                        rawPrompt, censorshipResult.MatchedWord, censorshipResult.SuperBlackList);
+
+                    return Ok(new
+                    {
+                        include = Array.Empty<object>(),
+                        exclude = Array.Empty<object>(),
+                        search = string.Empty,
+                        rejectedForCensorship = true,
+                        superBlackList = censorshipResult.SuperBlackList
+                    });
+                }
 
                 // 0) Cue index
                 var cueInfo = BuildCueIndex(rawPrompt);
@@ -586,7 +605,7 @@ namespace ShotDeckSearch.Controllers
                     .Select(r => new { keyword = r.Keyword, categories = r.Categories })
                     .ToList();
 
-                return Ok(new { include, exclude, search });
+                return Ok(new { include, exclude, search, rejectedForCensorship = false, superBlackList = false });
             }
             catch (Exception ex)
             {
