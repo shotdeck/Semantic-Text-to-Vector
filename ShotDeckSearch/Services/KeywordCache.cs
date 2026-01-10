@@ -30,6 +30,10 @@ namespace ShotDeck.Keywords
         string Canonicalize(string term);
         KeywordCacheStatus GetKeywordCacheStatus();
         Task RefreshAsync();
+        // Unwanted words methods - Dictionary maps phrase to is_super_blacklist
+        IReadOnlyDictionary<string, bool> GetUnwantedWords();
+        bool IsUnwantedWord(string word);
+        bool IsSuperBlacklistMatch(string text);
     }
     public sealed record SearchHit(string Keyword, IReadOnlyCollection<string> Sources);
     public sealed class KeywordCacheStatus
@@ -84,6 +88,16 @@ namespace ShotDeck.Keywords
             get;
             init;
         }
+        public int UnwantedWordsCount
+        {
+            get;
+            init;
+        }
+        public int SuperBlacklistCount
+        {
+            get;
+            init;
+        }
     }
     internal sealed class KeywordSnapshot
     {
@@ -95,18 +109,21 @@ namespace ShotDeck.Keywords
         public readonly PhraseMatcher Matcher;
         public readonly Dictionary<string,
         string> SynonymToMaster;
+        public readonly Dictionary<string, bool> UnwantedWords; // Key = phrase, Value = is_super_blacklist
         internal static readonly string FlatFile = "keywords_flat.csv";
         internal static readonly string SourcesFile = "keyword_sources.csv";
         internal static readonly string ByCategoryFile = "keywords_by_category.csv";
         internal static readonly string SynonymsFile = "keyword_synonyms.csv";
-        public static readonly KeywordSnapshot Empty = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase), new PhraseMatcher(new HashSet<string>(StringComparer.OrdinalIgnoreCase)), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
-        public KeywordSnapshot(HashSet<string> flat, Dictionary<string, HashSet<string>> sources, Dictionary<string, List<string>> byCategory, PhraseMatcher matcher, Dictionary<string, string> synonymToMaster)
+        internal static readonly string UnwantedWordsFile = "unwanted_words.csv";
+        public static readonly KeywordSnapshot Empty = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase), new PhraseMatcher(new HashSet<string>(StringComparer.OrdinalIgnoreCase)), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase));
+        public KeywordSnapshot(HashSet<string> flat, Dictionary<string, HashSet<string>> sources, Dictionary<string, List<string>> byCategory, PhraseMatcher matcher, Dictionary<string, string> synonymToMaster, Dictionary<string, bool> unwantedWords)
         {
             FlatSet = flat;
             KeywordSources = sources;
             KeywordsByCategory = byCategory;
             Matcher = matcher;
             SynonymToMaster = synonymToMaster;
+            UnwantedWords = unwantedWords;
         }
     }
     public class KeywordCacheService : IKeywordCacheService
@@ -407,6 +424,29 @@ namespace ShotDeck.Keywords
             return snap.SynonymToMaster.TryGetValue(term, out
             var master) && !string.IsNullOrWhiteSpace(master) ? master : term;
         }
+        public IReadOnlyDictionary<string, bool> GetUnwantedWords()
+        {
+            EnsureWarmOrCsvThenBackgroundRefresh();
+            return _snapshot.UnwantedWords;
+        }
+        public bool IsUnwantedWord(string word)
+        {
+            EnsureWarmOrCsvThenBackgroundRefresh();
+            if (string.IsNullOrWhiteSpace(word)) return false;
+            return _snapshot.UnwantedWords.ContainsKey(word.Trim());
+        }
+        public bool IsSuperBlacklistMatch(string text)
+        {
+            EnsureWarmOrCsvThenBackgroundRefresh();
+            if (string.IsNullOrWhiteSpace(text)) return false;
+            var normalizedText = text.ToLowerInvariant();
+            foreach (var kv in _snapshot.UnwantedWords)
+            {
+                if (kv.Value && normalizedText.Contains(kv.Key.ToLowerInvariant()))
+                    return true;
+            }
+            return false;
+        }
         public KeywordCacheStatus GetKeywordCacheStatus()
         {
             var snap = _snapshot;
@@ -421,7 +461,9 @@ namespace ShotDeck.Keywords
                 FlatCount = snap.FlatSet.Count,
                 SourceKeys = snap.KeywordSources.Count,
                 CategoryCount = snap.KeywordsByCategory.Count,
-                SynonymCount = snap.SynonymToMaster.Count
+                SynonymCount = snap.SynonymToMaster.Count,
+                UnwantedWordsCount = snap.UnwantedWords.Count,
+                SuperBlacklistCount = snap.UnwantedWords.Count(kv => kv.Value)
             };
         }
         private void EnsureWarmOrCsvThenBackgroundRefresh()
@@ -601,12 +643,16 @@ namespace ShotDeck.Keywords
                     foreach (var src in masterSources) synSources.Add(src);
                 }
             }
+            var unwantedWords = await FetchUnwantedWords(conn);
+            var superBlacklistCount = unwantedWords.Count(kv => kv.Value);
+            Console.WriteLine($"[KeywordCache] Unwanted words loaded: {unwantedWords.Count}, Super blacklist: {superBlacklistCount}");
+            
             var newMatcher = new PhraseMatcher(newSet);
-            var newSnapshot = new KeywordSnapshot(newSet, newSources, newByCategory, newMatcher, synonymToMaster);
+            var newSnapshot = new KeywordSnapshot(newSet, newSources, newByCategory, newMatcher, synonymToMaster, unwantedWords);
             SaveSnapshotToCsv(newSnapshot);
             Interlocked.Exchange(ref _snapshot, newSnapshot);
             PublishStatus();
-            Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}");
+            Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}, unwanted={_snapshot.UnwantedWords.Count}");
         }
         private static async Task<(Dictionary<string, string> SynonymToMaster, HashSet<string> AllMasterTerms)> FetchSynonymToMasterMapAndMasters(NpgsqlConnection conn)
         {
@@ -641,6 +687,26 @@ namespace ShotDeck.Keywords
             }
             return (map, allMasters);
         }
+        private static async Task<Dictionary<string, bool>> FetchUnwantedWords(NpgsqlConnection conn)
+        {
+            var unwantedWords = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            
+            const string sql = @"SELECT phrase, is_super_blacklist FROM frl.frl_keywords_unwanted_words;";
+            using var cmd = new NpgsqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+            
+            while (await reader.ReadAsync())
+            {
+                if (reader.IsDBNull(0)) continue;
+                var phrase = reader.GetString(0)?.Trim();
+                if (string.IsNullOrWhiteSpace(phrase)) continue;
+                
+                var isSuperBlacklist = !reader.IsDBNull(1) && reader.GetBoolean(1);
+                unwantedWords[phrase] = isSuperBlacklist;
+            }
+            
+            return unwantedWords;
+        }
         private bool TryWarmFromCsv(out KeywordSnapshot snapshot)
         {
             snapshot = KeywordSnapshot.Empty;
@@ -650,15 +716,19 @@ namespace ShotDeck.Keywords
                 var sourcesPath = Path.Combine(_csvDir, KeywordSnapshot.SourcesFile);
                 var byCatPath = Path.Combine(_csvDir, KeywordSnapshot.ByCategoryFile);
                 var synPath = Path.Combine(_csvDir, KeywordSnapshot.SynonymsFile);
+                var unwantedPath = Path.Combine(_csvDir, KeywordSnapshot.UnwantedWordsFile);
                 if (!File.Exists(flatPath) || !File.Exists(sourcesPath) || !File.Exists(byCatPath)) return false;
                 var flat = LoadFlatSet(flatPath);
                 var sources = LoadKeywordSources(sourcesPath);
                 var byCat = LoadKeywordsByCategory(byCatPath);
                 var synonyms = File.Exists(synPath) ? LoadSynonyms(synPath) : new Dictionary<string,
                 string>(StringComparer.OrdinalIgnoreCase);
+                var unwantedWords = File.Exists(unwantedPath) 
+                    ? LoadUnwantedWords(unwantedPath) 
+                    : new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
                 if (flat.Count == 0) return false;
                 var matcher = new PhraseMatcher(flat);
-                snapshot = new KeywordSnapshot(flat, sources, byCat, matcher, synonyms);
+                snapshot = new KeywordSnapshot(flat, sources, byCat, matcher, synonyms, unwantedWords);
                 return true;
             }
             catch (Exception ex)
@@ -731,6 +801,25 @@ namespace ShotDeck.Keywords
                 map[Uncsv(a)] = Uncsv(b);
             }
             return map;
+        }
+        private static Dictionary<string, bool> LoadUnwantedWords(string path)
+        {
+            var unwantedWords = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            
+            foreach (var line in File.ReadLines(path, Encoding.UTF8))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line.StartsWith("phrase,is_super_blacklist", StringComparison.OrdinalIgnoreCase)) continue;
+                
+                var (phrase, isSuperBlacklistStr) = SplitCsv2(line);
+                if (string.IsNullOrWhiteSpace(phrase)) continue;
+                
+                phrase = Uncsv(phrase);
+                var isSuperBlacklist = string.Equals(Uncsv(isSuperBlacklistStr), "true", StringComparison.OrdinalIgnoreCase);
+                unwantedWords[phrase] = isSuperBlacklist;
+            }
+            
+            return unwantedWords;
         }
         private static (string A, string B) SplitCsv2(string line)
         {
@@ -816,6 +905,14 @@ namespace ShotDeck.Keywords
         };
                 foreach (var kv in snap.SynonymToMaster.OrderBy(k => k.Key, StringComparer.OrdinalIgnoreCase)) synLines.Add($"{Csv(kv.Key)},{Csv(kv.Value)}");
                 File.WriteAllLines(Path.Combine(_csvDir, KeywordSnapshot.SynonymsFile), synLines, Encoding.UTF8);
+                
+                var unwantedLines = new List<string>(snap.UnwantedWords.Count + 1) { "phrase,is_super_blacklist" };
+                foreach (var kv in snap.UnwantedWords.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    unwantedLines.Add($"{Csv(kv.Key)},{(kv.Value ? "true" : "false")}");
+                }
+                File.WriteAllLines(Path.Combine(_csvDir, KeywordSnapshot.UnwantedWordsFile), unwantedLines, Encoding.UTF8);
+                
                 Console.WriteLine($"[KeywordCacheService] Snapshot CSVs written to {_csvDir}");
             }
             catch (Exception ex)
