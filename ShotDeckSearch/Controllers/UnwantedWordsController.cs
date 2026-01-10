@@ -44,7 +44,6 @@ namespace ShotDeckSearch.Controllers
         /// </summary>
         [HttpPost("import-csv")]
         [Consumes("multipart/form-data")]
-        [ProducesResponseType(typeof(ImportUnwantedWordsResult), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<ActionResult<ImportUnwantedWordsResult>> ImportCsv(
             [FromForm] ImportCsvRequest req,
