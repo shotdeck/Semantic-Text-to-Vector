@@ -29,6 +29,492 @@ namespace ShotDeckSearch.Controllers
             _logger = logger;
         }
 
+        #region Master Terms CRUD
+
+        /// <summary>
+        /// GET /api/admin/synonyms/masters
+        /// Returns all master terms from the database.
+        /// </summary>
+        [HttpGet("masters")]
+        [ProducesResponseType(typeof(List<MasterTermDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<List<MasterTermDto>>> GetAllMasters(CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, master_term, is_included FROM frl.frl_keywords_synonyms_master ORDER BY master_term;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                var results = new List<MasterTermDto>();
+                while (await reader.ReadAsync(ct))
+                {
+                    results.Add(new MasterTermDto
+                    {
+                        Id = reader.GetInt32(0),
+                        MasterTerm = reader.GetString(1),
+                        IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                    });
+                }
+
+                return Ok(results);
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// GET /api/admin/synonyms/masters/{id}
+        /// Returns a single master term by ID.
+        /// </summary>
+        [HttpGet("masters/{id:int}")]
+        [ProducesResponseType(typeof(MasterTermDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<MasterTermDto>> GetMasterById(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, master_term, is_included FROM frl.frl_keywords_synonyms_master WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Master term with ID {id} not found." });
+
+                return Ok(new MasterTermDto
+                {
+                    Id = reader.GetInt32(0),
+                    MasterTerm = reader.GetString(1),
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// POST /api/admin/synonyms/masters
+        /// Creates a new master term.
+        /// </summary>
+        [HttpPost("masters")]
+        [ProducesResponseType(typeof(MasterTermDto), StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<MasterTermDto>> CreateMaster([FromBody] CreateMasterTermRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.MasterTerm))
+                return BadRequest(new { Message = "MasterTerm is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+INSERT INTO frl.frl_keywords_synonyms_master (master_term, is_included)
+VALUES (@master_term, @is_included)
+RETURNING id, master_term, is_included;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@master_term", request.MasterTerm.Trim());
+                cmd.Parameters.AddWithValue("@is_included", request.IsIncluded ?? true);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return BadRequest(new { Message = "Failed to create master term." });
+
+                var result = new MasterTermDto
+                {
+                    Id = reader.GetInt32(0),
+                    MasterTerm = reader.GetString(1),
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                };
+
+                return CreatedAtAction(nameof(GetMasterById), new { id = result.Id }, result);
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"A master term '{request.MasterTerm}' already exists." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// PUT /api/admin/synonyms/masters/{id}
+        /// Updates an existing master term.
+        /// </summary>
+        [HttpPut("masters/{id:int}")]
+        [ProducesResponseType(typeof(MasterTermDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<MasterTermDto>> UpdateMaster(int id, [FromBody] UpdateMasterTermRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.MasterTerm))
+                return BadRequest(new { Message = "MasterTerm is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+UPDATE frl.frl_keywords_synonyms_master
+SET master_term = @master_term, is_included = @is_included
+WHERE id = @id
+RETURNING id, master_term, is_included;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.Parameters.AddWithValue("@master_term", request.MasterTerm.Trim());
+                cmd.Parameters.AddWithValue("@is_included", request.IsIncluded ?? true);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Master term with ID {id} not found." });
+
+                return Ok(new MasterTermDto
+                {
+                    Id = reader.GetInt32(0),
+                    MasterTerm = reader.GetString(1),
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                });
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"A master term '{request.MasterTerm}' already exists." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// DELETE /api/admin/synonyms/masters/{id}
+        /// Deletes a master term by ID (cascades to synonyms).
+        /// </summary>
+        [HttpDelete("masters/{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeleteMaster(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"DELETE FROM frl.frl_keywords_synonyms_master WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+
+                var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+
+                if (rowsAffected == 0)
+                    return NotFound(new { Message = $"Master term with ID {id} not found." });
+
+                return NoContent();
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        #endregion
+
+        #region Synonym Terms CRUD
+
+        /// <summary>
+        /// GET /api/admin/synonyms/masters/{masterId}/synonyms
+        /// Returns all synonyms for a master term.
+        /// </summary>
+        [HttpGet("masters/{masterId:int}/synonyms")]
+        [ProducesResponseType(typeof(List<SynonymDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<List<SynonymDto>>> GetSynonymsByMaster(int masterId, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string checkMasterSql = @"SELECT 1 FROM frl.frl_keywords_synonyms_master WHERE id = @master_id;";
+                await using (var checkCmd = new NpgsqlCommand(checkMasterSql, _connection))
+                {
+                    checkCmd.Parameters.AddWithValue("@master_id", masterId);
+                    var exists = await checkCmd.ExecuteScalarAsync(ct);
+                    if (exists is null)
+                        return NotFound(new { Message = $"Master term with ID {masterId} not found." });
+                }
+
+                const string sql = @"SELECT id, master_id, synonym_term, is_included FROM frl.frl_keywords_synonyms WHERE master_id = @master_id ORDER BY synonym_term;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@master_id", masterId);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                var results = new List<SynonymDto>();
+                while (await reader.ReadAsync(ct))
+                {
+                    results.Add(new SynonymDto
+                    {
+                        Id = reader.GetInt32(0),
+                        MasterId = reader.GetInt32(1),
+                        SynonymTerm = reader.GetString(2),
+                        IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
+                    });
+                }
+
+                return Ok(results);
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// GET /api/admin/synonyms/synonyms/{id}
+        /// Returns a single synonym by ID.
+        /// </summary>
+        [HttpGet("synonyms/{id:int}")]
+        [ProducesResponseType(typeof(SynonymDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<SynonymDto>> GetSynonymById(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, master_id, synonym_term, is_included FROM frl.frl_keywords_synonyms WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Synonym with ID {id} not found." });
+
+                return Ok(new SynonymDto
+                {
+                    Id = reader.GetInt32(0),
+                    MasterId = reader.GetInt32(1),
+                    SynonymTerm = reader.GetString(2),
+                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
+                });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// POST /api/admin/synonyms/masters/{masterId}/synonyms
+        /// Creates a new synonym for a master term.
+        /// </summary>
+        [HttpPost("masters/{masterId:int}/synonyms")]
+        [ProducesResponseType(typeof(SynonymDto), StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<SynonymDto>> CreateSynonym(int masterId, [FromBody] CreateSynonymRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.SynonymTerm))
+                return BadRequest(new { Message = "SynonymTerm is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string checkMasterSql = @"SELECT 1 FROM frl.frl_keywords_synonyms_master WHERE id = @master_id;";
+                await using (var checkCmd = new NpgsqlCommand(checkMasterSql, _connection))
+                {
+                    checkCmd.Parameters.AddWithValue("@master_id", masterId);
+                    var exists = await checkCmd.ExecuteScalarAsync(ct);
+                    if (exists is null)
+                        return NotFound(new { Message = $"Master term with ID {masterId} not found." });
+                }
+
+                const string sql = @"
+INSERT INTO frl.frl_keywords_synonyms (master_id, synonym_term, is_included)
+VALUES (@master_id, @synonym_term, @is_included)
+RETURNING id, master_id, synonym_term, is_included;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@master_id", masterId);
+                cmd.Parameters.AddWithValue("@synonym_term", request.SynonymTerm.Trim());
+                cmd.Parameters.AddWithValue("@is_included", request.IsIncluded ?? true);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return BadRequest(new { Message = "Failed to create synonym." });
+
+                var result = new SynonymDto
+                {
+                    Id = reader.GetInt32(0),
+                    MasterId = reader.GetInt32(1),
+                    SynonymTerm = reader.GetString(2),
+                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
+                };
+
+                return CreatedAtAction(nameof(GetSynonymById), new { id = result.Id }, result);
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"A synonym '{request.SynonymTerm}' already exists for this master term." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// PUT /api/admin/synonyms/synonyms/{id}
+        /// Updates an existing synonym.
+        /// </summary>
+        [HttpPut("synonyms/{id:int}")]
+        [ProducesResponseType(typeof(SynonymDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<SynonymDto>> UpdateSynonym(int id, [FromBody] UpdateSynonymRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.SynonymTerm))
+                return BadRequest(new { Message = "SynonymTerm is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+UPDATE frl.frl_keywords_synonyms
+SET synonym_term = @synonym_term, is_included = @is_included
+WHERE id = @id
+RETURNING id, master_id, synonym_term, is_included;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.Parameters.AddWithValue("@synonym_term", request.SynonymTerm.Trim());
+                cmd.Parameters.AddWithValue("@is_included", request.IsIncluded ?? true);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Synonym with ID {id} not found." });
+
+                return Ok(new SynonymDto
+                {
+                    Id = reader.GetInt32(0),
+                    MasterId = reader.GetInt32(1),
+                    SynonymTerm = reader.GetString(2),
+                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
+                });
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"A synonym '{request.SynonymTerm}' already exists for this master term." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// DELETE /api/admin/synonyms/synonyms/{id}
+        /// Deletes a synonym by ID.
+        /// </summary>
+        [HttpDelete("synonyms/{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeleteSynonym(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"DELETE FROM frl.frl_keywords_synonyms WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+
+                var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+
+                if (rowsAffected == 0)
+                    return NotFound(new { Message = $"Synonym with ID {id} not found." });
+
+                return NoContent();
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        #endregion
+
+        #region CSV Import
+
         /// <summary>
         /// POST /api/admin/synonyms/import-csv
         /// multipart/form-data:
@@ -228,6 +714,8 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
             }
         }
 
+        #endregion
+
         #region Helpers
 
         private static string? FindHeader(string[] headers, string wanted)
@@ -243,6 +731,45 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
         #endregion
 
         #region DTOs
+
+        public sealed class MasterTermDto
+        {
+            public int Id { get; set; }
+            public string MasterTerm { get; set; } = default!;
+            public bool IsIncluded { get; set; }
+        }
+
+        public sealed class CreateMasterTermRequest
+        {
+            public string? MasterTerm { get; set; }
+            public bool? IsIncluded { get; set; }
+        }
+
+        public sealed class UpdateMasterTermRequest
+        {
+            public string? MasterTerm { get; set; }
+            public bool? IsIncluded { get; set; }
+        }
+
+        public sealed class SynonymDto
+        {
+            public int Id { get; set; }
+            public int MasterId { get; set; }
+            public string SynonymTerm { get; set; } = default!;
+            public bool IsIncluded { get; set; }
+        }
+
+        public sealed class CreateSynonymRequest
+        {
+            public string? SynonymTerm { get; set; }
+            public bool? IsIncluded { get; set; }
+        }
+
+        public sealed class UpdateSynonymRequest
+        {
+            public string? SynonymTerm { get; set; }
+            public bool? IsIncluded { get; set; }
+        }
 
         public sealed class ImportCsvRequest
         {
