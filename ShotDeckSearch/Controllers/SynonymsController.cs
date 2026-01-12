@@ -714,6 +714,8 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
             }
         }
 
+        #endregion
+
         #region Helpers
 
         private static string? FindHeader(string[] headers, string wanted)
