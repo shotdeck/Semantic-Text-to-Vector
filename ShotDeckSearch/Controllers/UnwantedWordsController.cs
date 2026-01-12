@@ -30,6 +30,231 @@ namespace ShotDeckSearch.Controllers
         }
 
         /// <summary>
+        /// GET /api/admin/unwanted-words
+        /// Returns all unwanted words from the database.
+        /// </summary>
+        [HttpGet]
+        [ProducesResponseType(typeof(List<UnwantedWordDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<List<UnwantedWordDto>>> GetAll(CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, phrase, is_super_blacklist FROM frl.frl_keywords_unwanted_words ORDER BY phrase;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                var results = new List<UnwantedWordDto>();
+                while (await reader.ReadAsync(ct))
+                {
+                    results.Add(new UnwantedWordDto
+                    {
+                        Id = reader.GetInt32(0),
+                        Phrase = reader.GetString(1),
+                        IsSuperBlacklist = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                    });
+                }
+
+                return Ok(results);
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// GET /api/admin/unwanted-words/{id}
+        /// Returns a single unwanted word by ID.
+        /// </summary>
+        [HttpGet("{id:int}")]
+        [ProducesResponseType(typeof(UnwantedWordDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<UnwantedWordDto>> GetById(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, phrase, is_super_blacklist FROM frl.frl_keywords_unwanted_words WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Unwanted word with ID {id} not found." });
+
+                return Ok(new UnwantedWordDto
+                {
+                    Id = reader.GetInt32(0),
+                    Phrase = reader.GetString(1),
+                    IsSuperBlacklist = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// POST /api/admin/unwanted-words
+        /// Creates a new unwanted word.
+        /// </summary>
+        [HttpPost]
+        [ProducesResponseType(typeof(UnwantedWordDto), StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<UnwantedWordDto>> Create([FromBody] CreateUnwantedWordRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.Phrase))
+                return BadRequest(new { Message = "Phrase is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+INSERT INTO frl.frl_keywords_unwanted_words (phrase, is_super_blacklist)
+VALUES (@phrase, @is_super_blacklist)
+RETURNING id, phrase, is_super_blacklist;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@phrase", request.Phrase.Trim());
+                cmd.Parameters.AddWithValue("@is_super_blacklist", request.IsSuperBlacklist ?? false);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return BadRequest(new { Message = "Failed to create unwanted word." });
+
+                var result = new UnwantedWordDto
+                {
+                    Id = reader.GetInt32(0),
+                    Phrase = reader.GetString(1),
+                    IsSuperBlacklist = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                };
+
+                return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"An unwanted word with phrase '{request.Phrase}' already exists." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// PUT /api/admin/unwanted-words/{id}
+        /// Updates an existing unwanted word.
+        /// </summary>
+        [HttpPut("{id:int}")]
+        [ProducesResponseType(typeof(UnwantedWordDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<UnwantedWordDto>> Update(int id, [FromBody] UpdateUnwantedWordRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.Phrase))
+                return BadRequest(new { Message = "Phrase is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+UPDATE frl.frl_keywords_unwanted_words
+SET phrase = @phrase, is_super_blacklist = @is_super_blacklist
+WHERE id = @id
+RETURNING id, phrase, is_super_blacklist;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.Parameters.AddWithValue("@phrase", request.Phrase.Trim());
+                cmd.Parameters.AddWithValue("@is_super_blacklist", request.IsSuperBlacklist ?? false);
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Unwanted word with ID {id} not found." });
+
+                return Ok(new UnwantedWordDto
+                {
+                    Id = reader.GetInt32(0),
+                    Phrase = reader.GetString(1),
+                    IsSuperBlacklist = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                });
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"An unwanted word with phrase '{request.Phrase}' already exists." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// DELETE /api/admin/unwanted-words/{id}
+        /// Deletes an unwanted word by ID.
+        /// </summary>
+        [HttpDelete("{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> Delete(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"DELETE FROM frl.frl_keywords_unwanted_words WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+
+                var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+
+                if (rowsAffected == 0)
+                    return NotFound(new { Message = $"Unwanted word with ID {id} not found." });
+
+                return NoContent();
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
         /// POST /api/admin/unwanted-words/import-csv
         /// multipart/form-data:
         ///   - file: CSV with columns:
@@ -213,6 +438,25 @@ RETURNING id;";
         #endregion
 
         #region DTOs
+
+        public sealed class UnwantedWordDto
+        {
+            public int Id { get; set; }
+            public string Phrase { get; set; } = default!;
+            public bool IsSuperBlacklist { get; set; }
+        }
+
+        public sealed class CreateUnwantedWordRequest
+        {
+            public string? Phrase { get; set; }
+            public bool? IsSuperBlacklist { get; set; }
+        }
+
+        public sealed class UpdateUnwantedWordRequest
+        {
+            public string? Phrase { get; set; }
+            public bool? IsSuperBlacklist { get; set; }
+        }
 
         public sealed class ImportCsvRequest
         {
