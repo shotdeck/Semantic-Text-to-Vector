@@ -48,7 +48,7 @@ namespace ShotDeckSearch.Controllers
 
             try
             {
-                const string sql = @"SELECT id, master_term, is_included, created_at FROM frl.frl_keywords_synonyms_master ORDER BY master_term;";
+                const string sql = @"SELECT id, master_term, is_included FROM frl.frl_keywords_synonyms_master ORDER BY master_term;";
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -59,8 +59,7 @@ namespace ShotDeckSearch.Controllers
                     {
                         Id = reader.GetInt32(0),
                         MasterTerm = reader.GetString(1),
-                        IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
-                        CreatedAt = reader.GetDateTime(3)
+                        IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
                     });
                 }
 
@@ -90,7 +89,7 @@ namespace ShotDeckSearch.Controllers
 
             try
             {
-                const string sql = @"SELECT id, master_term, is_included, created_at FROM frl.frl_keywords_synonyms_master WHERE id = @id;";
+                const string sql = @"SELECT id, master_term, is_included FROM frl.frl_keywords_synonyms_master WHERE id = @id;";
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@id", id);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -102,8 +101,7 @@ namespace ShotDeckSearch.Controllers
                 {
                     Id = reader.GetInt32(0),
                     MasterTerm = reader.GetString(1),
-                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
-                    CreatedAt = reader.GetDateTime(3)
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
                 });
             }
             finally
@@ -137,7 +135,7 @@ namespace ShotDeckSearch.Controllers
                 const string sql = @"
 INSERT INTO frl.frl_keywords_synonyms_master (master_term, is_included)
 VALUES (@master_term, @is_included)
-RETURNING id, master_term, is_included, created_at;";
+RETURNING id, master_term, is_included;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@master_term", request.MasterTerm.Trim());
@@ -152,8 +150,7 @@ RETURNING id, master_term, is_included, created_at;";
                 {
                     Id = reader.GetInt32(0),
                     MasterTerm = reader.GetString(1),
-                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
-                    CreatedAt = reader.GetDateTime(3)
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
                 };
 
                 return CreatedAtAction(nameof(GetMasterById), new { id = result.Id }, result);
@@ -195,7 +192,7 @@ RETURNING id, master_term, is_included, created_at;";
 UPDATE frl.frl_keywords_synonyms_master
 SET master_term = @master_term, is_included = @is_included
 WHERE id = @id
-RETURNING id, master_term, is_included, created_at;";
+RETURNING id, master_term, is_included;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@id", id);
@@ -211,8 +208,7 @@ RETURNING id, master_term, is_included, created_at;";
                 {
                     Id = reader.GetInt32(0),
                     MasterTerm = reader.GetString(1),
-                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
-                    CreatedAt = reader.GetDateTime(3)
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
                 });
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -291,7 +287,7 @@ RETURNING id, master_term, is_included, created_at;";
                         return NotFound(new { Message = $"Master term with ID {masterId} not found." });
                 }
 
-                const string sql = @"SELECT id, master_id, synonym_term, is_included, created_at FROM frl.frl_keywords_synonyms WHERE master_id = @master_id ORDER BY synonym_term;";
+                const string sql = @"SELECT id, master_id, synonym_term, is_included FROM frl.frl_keywords_synonyms WHERE master_id = @master_id ORDER BY synonym_term;";
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@master_id", masterId);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -304,8 +300,7 @@ RETURNING id, master_term, is_included, created_at;";
                         Id = reader.GetInt32(0),
                         MasterId = reader.GetInt32(1),
                         SynonymTerm = reader.GetString(2),
-                        IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3),
-                        CreatedAt = reader.GetDateTime(4)
+                        IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
                     });
                 }
 
@@ -335,7 +330,7 @@ RETURNING id, master_term, is_included, created_at;";
 
             try
             {
-                const string sql = @"SELECT id, master_id, synonym_term, is_included, created_at FROM frl.frl_keywords_synonyms WHERE id = @id;";
+                const string sql = @"SELECT id, master_id, synonym_term, is_included FROM frl.frl_keywords_synonyms WHERE id = @id;";
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@id", id);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -348,8 +343,7 @@ RETURNING id, master_term, is_included, created_at;";
                     Id = reader.GetInt32(0),
                     MasterId = reader.GetInt32(1),
                     SynonymTerm = reader.GetString(2),
-                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3),
-                    CreatedAt = reader.GetDateTime(4)
+                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
                 });
             }
             finally
@@ -393,7 +387,7 @@ RETURNING id, master_term, is_included, created_at;";
                 const string sql = @"
 INSERT INTO frl.frl_keywords_synonyms (master_id, synonym_term, is_included)
 VALUES (@master_id, @synonym_term, @is_included)
-RETURNING id, master_id, synonym_term, is_included, created_at;";
+RETURNING id, master_id, synonym_term, is_included;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@master_id", masterId);
@@ -410,8 +404,7 @@ RETURNING id, master_id, synonym_term, is_included, created_at;";
                     Id = reader.GetInt32(0),
                     MasterId = reader.GetInt32(1),
                     SynonymTerm = reader.GetString(2),
-                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3),
-                    CreatedAt = reader.GetDateTime(4)
+                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
                 };
 
                 return CreatedAtAction(nameof(GetSynonymById), new { id = result.Id }, result);
@@ -453,7 +446,7 @@ RETURNING id, master_id, synonym_term, is_included, created_at;";
 UPDATE frl.frl_keywords_synonyms
 SET synonym_term = @synonym_term, is_included = @is_included
 WHERE id = @id
-RETURNING id, master_id, synonym_term, is_included, created_at;";
+RETURNING id, master_id, synonym_term, is_included;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@id", id);
@@ -470,8 +463,7 @@ RETURNING id, master_id, synonym_term, is_included, created_at;";
                     Id = reader.GetInt32(0),
                     MasterId = reader.GetInt32(1),
                     SynonymTerm = reader.GetString(2),
-                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3),
-                    CreatedAt = reader.GetDateTime(4)
+                    IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
                 });
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -743,7 +735,6 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
             public int Id { get; set; }
             public string MasterTerm { get; set; } = default!;
             public bool IsIncluded { get; set; }
-            public DateTime CreatedAt { get; set; }
         }
 
         public sealed class CreateMasterTermRequest
@@ -764,7 +755,6 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
             public int MasterId { get; set; }
             public string SynonymTerm { get; set; } = default!;
             public bool IsIncluded { get; set; }
-            public DateTime CreatedAt { get; set; }
         }
 
         public sealed class CreateSynonymRequest
