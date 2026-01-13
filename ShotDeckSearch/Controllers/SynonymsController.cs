@@ -48,7 +48,11 @@ namespace ShotDeckSearch.Controllers
 
             try
             {
-                const string sql = @"SELECT id, master_term, is_included FROM frl.frl_keywords_synonyms_master ORDER BY master_term;";
+                const string sql = @"
+SELECT m.id, m.master_term, m.is_included, m.category_id, c.category_name
+FROM frl.frl_keywords_synonyms_master m
+LEFT JOIN frl.frl_keywords_synonyms_category c ON m.category_id = c.id
+ORDER BY m.master_term;";
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -59,7 +63,9 @@ namespace ShotDeckSearch.Controllers
                     {
                         Id = reader.GetInt32(0),
                         MasterTerm = reader.GetString(1),
-                        IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                        IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
+                        CategoryId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                        CategoryName = reader.IsDBNull(4) ? null : reader.GetString(4)
                     });
                 }
 
@@ -89,7 +95,11 @@ namespace ShotDeckSearch.Controllers
 
             try
             {
-                const string sql = @"SELECT id, master_term, is_included FROM frl.frl_keywords_synonyms_master WHERE id = @id;";
+                const string sql = @"
+SELECT m.id, m.master_term, m.is_included, m.category_id, c.category_name
+FROM frl.frl_keywords_synonyms_master m
+LEFT JOIN frl.frl_keywords_synonyms_category c ON m.category_id = c.id
+WHERE m.id = @id;";
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@id", id);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
@@ -101,7 +111,9 @@ namespace ShotDeckSearch.Controllers
                 {
                     Id = reader.GetInt32(0),
                     MasterTerm = reader.GetString(1),
-                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
+                    CategoryId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    CategoryName = reader.IsDBNull(4) ? null : reader.GetString(4)
                 });
             }
             finally
@@ -133,13 +145,19 @@ namespace ShotDeckSearch.Controllers
             try
             {
                 const string sql = @"
-INSERT INTO frl.frl_keywords_synonyms_master (master_term, is_included)
-VALUES (@master_term, @is_included)
-RETURNING id, master_term, is_included;";
+WITH inserted AS (
+    INSERT INTO frl.frl_keywords_synonyms_master (master_term, is_included, category_id)
+    VALUES (@master_term, @is_included, @category_id)
+    RETURNING id, master_term, is_included, category_id
+)
+SELECT i.id, i.master_term, i.is_included, i.category_id, c.category_name
+FROM inserted i
+LEFT JOIN frl.frl_keywords_synonyms_category c ON i.category_id = c.id;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@master_term", request.MasterTerm.Trim());
                 cmd.Parameters.AddWithValue("@is_included", request.IsIncluded ?? true);
+                cmd.Parameters.AddWithValue("@category_id", request.CategoryId.HasValue ? request.CategoryId.Value : DBNull.Value);
 
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -150,7 +168,9 @@ RETURNING id, master_term, is_included;";
                 {
                     Id = reader.GetInt32(0),
                     MasterTerm = reader.GetString(1),
-                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
+                    CategoryId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    CategoryName = reader.IsDBNull(4) ? null : reader.GetString(4)
                 };
 
                 return CreatedAtAction(nameof(GetMasterById), new { id = result.Id }, result);
@@ -189,15 +209,21 @@ RETURNING id, master_term, is_included;";
             try
             {
                 const string sql = @"
-UPDATE frl.frl_keywords_synonyms_master
-SET master_term = @master_term, is_included = @is_included
-WHERE id = @id
-RETURNING id, master_term, is_included;";
+WITH updated AS (
+    UPDATE frl.frl_keywords_synonyms_master
+    SET master_term = @master_term, is_included = @is_included, category_id = @category_id
+    WHERE id = @id
+    RETURNING id, master_term, is_included, category_id
+)
+SELECT u.id, u.master_term, u.is_included, u.category_id, c.category_name
+FROM updated u
+LEFT JOIN frl.frl_keywords_synonyms_category c ON u.category_id = c.id;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@id", id);
                 cmd.Parameters.AddWithValue("@master_term", request.MasterTerm.Trim());
                 cmd.Parameters.AddWithValue("@is_included", request.IsIncluded ?? true);
+                cmd.Parameters.AddWithValue("@category_id", request.CategoryId.HasValue ? request.CategoryId.Value : DBNull.Value);
 
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -208,7 +234,9 @@ RETURNING id, master_term, is_included;";
                 {
                     Id = reader.GetInt32(0),
                     MasterTerm = reader.GetString(1),
-                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2)
+                    IsIncluded = !reader.IsDBNull(2) && reader.GetBoolean(2),
+                    CategoryId = reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                    CategoryName = reader.IsDBNull(4) ? null : reader.GetString(4)
                 });
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -247,6 +275,229 @@ RETURNING id, master_term, is_included;";
 
                 if (rowsAffected == 0)
                     return NotFound(new { Message = $"Master term with ID {id} not found." });
+
+                return NoContent();
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        #endregion
+
+        #region Categories CRUD
+
+        /// <summary>
+        /// GET /api/admin/synonyms/categories
+        /// Returns all categories.
+        /// </summary>
+        [HttpGet("categories")]
+        [ProducesResponseType(typeof(List<CategoryDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<List<CategoryDto>>> GetAllCategories(CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, category_name FROM frl.frl_keywords_synonyms_category ORDER BY category_name;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                var results = new List<CategoryDto>();
+                while (await reader.ReadAsync(ct))
+                {
+                    results.Add(new CategoryDto
+                    {
+                        Id = reader.GetInt32(0),
+                        CategoryName = reader.GetString(1)
+                    });
+                }
+
+                return Ok(results);
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// GET /api/admin/synonyms/categories/{id}
+        /// Returns a single category by ID.
+        /// </summary>
+        [HttpGet("categories/{id:int}")]
+        [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<CategoryDto>> GetCategoryById(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"SELECT id, category_name FROM frl.frl_keywords_synonyms_category WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Category with ID {id} not found." });
+
+                return Ok(new CategoryDto
+                {
+                    Id = reader.GetInt32(0),
+                    CategoryName = reader.GetString(1)
+                });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// POST /api/admin/synonyms/categories
+        /// Creates a new category.
+        /// </summary>
+        [HttpPost("categories")]
+        [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status201Created)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<CategoryDto>> CreateCategory([FromBody] CreateCategoryRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.CategoryName))
+                return BadRequest(new { Message = "CategoryName is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+INSERT INTO frl.frl_keywords_synonyms_category (category_name)
+VALUES (@category_name)
+RETURNING id, category_name;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@category_name", request.CategoryName.Trim());
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return BadRequest(new { Message = "Failed to create category." });
+
+                var result = new CategoryDto
+                {
+                    Id = reader.GetInt32(0),
+                    CategoryName = reader.GetString(1)
+                };
+
+                return CreatedAtAction(nameof(GetCategoryById), new { id = result.Id }, result);
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"A category '{request.CategoryName}' already exists." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// PUT /api/admin/synonyms/categories/{id}
+        /// Updates an existing category.
+        /// </summary>
+        [HttpPut("categories/{id:int}")]
+        [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        [ProducesResponseType(StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<CategoryDto>> UpdateCategory(int id, [FromBody] UpdateCategoryRequest request, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(request.CategoryName))
+                return BadRequest(new { Message = "CategoryName is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+UPDATE frl.frl_keywords_synonyms_category
+SET category_name = @category_name
+WHERE id = @id
+RETURNING id, category_name;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+                cmd.Parameters.AddWithValue("@category_name", request.CategoryName.Trim());
+
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                if (!await reader.ReadAsync(ct))
+                    return NotFound(new { Message = $"Category with ID {id} not found." });
+
+                return Ok(new CategoryDto
+                {
+                    Id = reader.GetInt32(0),
+                    CategoryName = reader.GetString(1)
+                });
+            }
+            catch (PostgresException ex) when (ex.SqlState == "23505")
+            {
+                return Conflict(new { Message = $"A category '{request.CategoryName}' already exists." });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
+        /// DELETE /api/admin/synonyms/categories/{id}
+        /// Deletes a category by ID.
+        /// </summary>
+        [HttpDelete("categories/{id:int}")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> DeleteCategory(int id, CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"DELETE FROM frl.frl_keywords_synonyms_category WHERE id = @id;";
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@id", id);
+
+                var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
+
+                if (rowsAffected == 0)
+                    return NotFound(new { Message = $"Category with ID {id} not found." });
 
                 return NoContent();
             }
@@ -567,11 +818,19 @@ RETURNING id, master_id, synonym_term, is_included;";
                         await c2.ExecuteNonQueryAsync(ct);
                 }
 
+                // Upsert category and return its ID
+                const string upsertCategorySql = @"
+INSERT INTO frl.frl_keywords_synonyms_category (category_name)
+VALUES (@category_name)
+ON CONFLICT (category_name)
+DO UPDATE SET category_name = EXCLUDED.category_name
+RETURNING id;";
+
                 const string upsertMasterSql = @"
-INSERT INTO frl.frl_keywords_synonyms_master (master_term)
-VALUES (@master_term)
+INSERT INTO frl.frl_keywords_synonyms_master (master_term, category_id)
+VALUES (@master_term, @category_id)
 ON CONFLICT (master_term)
-DO UPDATE SET master_term = EXCLUDED.master_term
+DO UPDATE SET master_term = EXCLUDED.master_term, category_id = EXCLUDED.category_id
 RETURNING id;";
 
                 const string insertSynSql = @"
@@ -579,12 +838,19 @@ INSERT INTO frl.frl_keywords_synonyms (master_id, synonym_term, is_included)
 VALUES (@master_id, @synonym_term, TRUE)
 ON CONFLICT (master_id, synonym_term) DO NOTHING;";
 
+                await using var upsertCategoryCmd = new NpgsqlCommand(upsertCategorySql, _connection, tx);
+                upsertCategoryCmd.Parameters.Add("@category_name", NpgsqlDbType.Text);
+
                 await using var upsertMasterCmd = new NpgsqlCommand(upsertMasterSql, _connection, tx);
                 upsertMasterCmd.Parameters.Add("@master_term", NpgsqlDbType.Text);
+                upsertMasterCmd.Parameters.Add("@category_id", NpgsqlDbType.Integer);
 
                 await using var insertSynCmd = new NpgsqlCommand(insertSynSql, _connection, tx);
                 insertSynCmd.Parameters.Add("@master_id", NpgsqlDbType.Integer);
                 insertSynCmd.Parameters.Add("@synonym_term", NpgsqlDbType.Text);
+
+                // Cache for category name -> id mapping
+                var categoryCache = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
                 var result = new ImportSynonymsResult();
 
@@ -612,6 +878,9 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
                 if (string.IsNullOrWhiteSpace(masterHeader))
                     return BadRequest("CSV must contain a 'MASTER TERM' column.");
 
+                // Find TYPE column for category (optional)
+                var typeHeader = FindHeader(headers, "TYPE");
+
                 // Flexible ALT TERM columns (ALT TERM 1..N, ALT TERM 10+ supported)
                 var altHeaders = headers
                     .Where(h => !string.IsNullOrWhiteSpace(h))
@@ -629,6 +898,37 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
                     {
                         result.RowsSkipped++;
                         continue;
+                    }
+
+                    // Get category from TYPE column if present
+                    var categoryName = !string.IsNullOrWhiteSpace(typeHeader) 
+                        ? (SafeGet(csv, typeHeader) ?? "").Trim() 
+                        : "";
+                    int? categoryId = null;
+
+                    // Get or create category if TYPE is specified
+                    if (!string.IsNullOrWhiteSpace(categoryName))
+                    {
+                        if (categoryCache.TryGetValue(categoryName, out var cachedId))
+                        {
+                            categoryId = cachedId;
+                        }
+                        else if (!dryRun)
+                        {
+                            upsertCategoryCmd.Parameters["@category_name"].Value = categoryName;
+                            var catScalar = await upsertCategoryCmd.ExecuteScalarAsync(ct);
+                            if (catScalar is not null)
+                            {
+                                categoryId = Convert.ToInt32(catScalar);
+                                categoryCache[categoryName] = categoryId.Value;
+                            }
+                        }
+                        else
+                        {
+                            // In dry run, just track that we would create this category
+                            categoryCache[categoryName] = -1;
+                            categoryId = -1;
+                        }
                     }
 
                     var alts = new List<string>();
@@ -656,6 +956,7 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
                     else
                     {
                         upsertMasterCmd.Parameters["@master_term"].Value = master;
+                        upsertMasterCmd.Parameters["@category_id"].Value = categoryId.HasValue ? categoryId.Value : DBNull.Value;
                         var scalar = await upsertMasterCmd.ExecuteScalarAsync(ct);
 
                         if (scalar is null)
@@ -732,23 +1033,43 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
 
         #region DTOs
 
+        public sealed class CategoryDto
+        {
+            public int Id { get; set; }
+            public string CategoryName { get; set; } = default!;
+        }
+
+        public sealed class CreateCategoryRequest
+        {
+            public string? CategoryName { get; set; }
+        }
+
+        public sealed class UpdateCategoryRequest
+        {
+            public string? CategoryName { get; set; }
+        }
+
         public sealed class MasterTermDto
         {
             public int Id { get; set; }
             public string MasterTerm { get; set; } = default!;
             public bool IsIncluded { get; set; }
+            public int? CategoryId { get; set; }
+            public string? CategoryName { get; set; }
         }
 
         public sealed class CreateMasterTermRequest
         {
             public string? MasterTerm { get; set; }
             public bool? IsIncluded { get; set; }
+            public int? CategoryId { get; set; }
         }
 
         public sealed class UpdateMasterTermRequest
         {
             public string? MasterTerm { get; set; }
             public bool? IsIncluded { get; set; }
+            public int? CategoryId { get; set; }
         }
 
         public sealed class SynonymDto
