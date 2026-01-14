@@ -1,0 +1,6 @@
+@ShotDeckSearch_HostAddress = http://localhost:5204
+
+GET {{ShotDeckSearch_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

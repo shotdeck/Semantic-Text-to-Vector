@@ -1,0 +1,30 @@
+﻿/* ---- ShotDeck top bar only (leave everything else default) ---- */
+.swagger-ui .topbar {
+    background: #0b0b0b !important; /* ShotDeck black */
+    border-bottom: 1px solid #0ea5e9 !important; /* subtle cyan accent */
+    padding-left: 1rem;
+    height: 60px;
+    display: flex;
+    align-items: center;
+}
+
+    /* Hide only the built-in Swagger/SmartBear marks */
+    .swagger-ui .topbar .topbar-wrapper .link .logo__img,
+    .swagger-ui .topbar .topbar-wrapper .link .logo__title,
+    .swagger-ui .topbar .topbar-wrapper .link svg {
+        display: none !important;
+    }
+
+/* Our custom brand anchor (logo only) */
+.sd-brand {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+}
+
+.sd-brand-logo {
+    height: 32px;
+    width: auto;
+    display: inline-block;
+    filter: brightness(1.2); /* crisp on dark bg */
+}
