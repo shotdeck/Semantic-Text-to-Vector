@@ -47,36 +47,25 @@ namespace ShotDeckSearch.Controllers
             _logger = logger;
         }
 
-        [HttpGet("test")]
-        public ActionResult<String> Test()
+        /// <summary>
+        /// Checks whether the supplied password matches the configured password.
+        /// </summary>
+        /// <param name="password">Password to validate</param>
+        /// <returns>true if valid, false otherwise</returns>
+        [HttpGet("check-password")]
+        public ActionResult<bool> CheckPassword([FromQuery] string password)
         {
-            try
-            {
-                string x = _configuration["ConnectionStrings:Default"];
-                return Ok(x);
-            }
-            catch (Exception ex) 
-            {
-                return BadRequest(ex);
-            }
-            
+            if (string.IsNullOrEmpty(password))
+                return false;
+
+            var configuredPassword = _configuration["Password"];
+
+            if (string.IsNullOrEmpty(configuredPassword))
+                return false;
+
+            return password == configuredPassword;
         }
 
-        [HttpGet("test2")]
-        public ActionResult<String> Test2()
-        {
-            try
-            {
-                string x = _configuration["SSH_PRIVATE_KEY"];
-                return Ok(x);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(ex);
-            }
-
-        }
-       
 
 
         [HttpGet("word-in-keywords")]
