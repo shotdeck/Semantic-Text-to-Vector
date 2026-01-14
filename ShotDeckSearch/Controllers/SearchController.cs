@@ -528,7 +528,7 @@ namespace ShotDeckSearch.Controllers
                             c.IndexOf("actor", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             c.IndexOf("cast", StringComparison.OrdinalIgnoreCase) >= 0);
 
-                        if (hasPersonBucket && !(wantDirector || wantActing || wantCine || wantProd || wantCostume))
+                        if (hasPersonBucket && !isSynonymMaster && !(wantDirector || wantActing || wantCine || wantProd || wantCostume))
                         {
                             var toRemove = catSet
                                 .Where(c =>
