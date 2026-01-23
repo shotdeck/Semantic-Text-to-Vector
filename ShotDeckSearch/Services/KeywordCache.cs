@@ -36,6 +36,7 @@ namespace ShotDeck.Keywords
         bool IsSuperBlacklistMatch(string text);
         CensorshipCheckResult CheckCensorship(string text);
         IReadOnlyCollection<string> GetAllSynonymMasters();
+        string? GetSynonymCategory(string keyword);
     }
     public sealed class CensorshipCheckResult
     {
@@ -120,14 +121,16 @@ namespace ShotDeck.Keywords
         string> SynonymToMaster;
         public readonly Dictionary<string, bool> UnwantedWords;
         public readonly HashSet<string> AllMasterTerms;
+        public readonly Dictionary<string, string> MasterTermCategories;
         internal static readonly string FlatFile = "keywords_flat.csv";
         internal static readonly string SourcesFile = "keyword_sources.csv";
         internal static readonly string ByCategoryFile = "keywords_by_category.csv";
         internal static readonly string SynonymsFile = "keyword_synonyms.csv";
         internal static readonly string UnwantedWordsFile = "unwanted_words.csv";
         internal static readonly string MasterTermsFile = "master_terms.csv";
-        public static readonly KeywordSnapshot Empty = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase), new PhraseMatcher(new HashSet<string>(StringComparer.OrdinalIgnoreCase)), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-        public KeywordSnapshot(HashSet<string> flat, Dictionary<string, HashSet<string>> sources, Dictionary<string, List<string>> byCategory, PhraseMatcher matcher, Dictionary<string, string> synonymToMaster, Dictionary<string, bool> unwantedWords, HashSet<string> allMasterTerms)
+        internal static readonly string MasterTermCategoriesFile = "master_term_categories.csv";
+        public static readonly KeywordSnapshot Empty = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase), new PhraseMatcher(new HashSet<string>(StringComparer.OrdinalIgnoreCase)), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+        public KeywordSnapshot(HashSet<string> flat, Dictionary<string, HashSet<string>> sources, Dictionary<string, List<string>> byCategory, PhraseMatcher matcher, Dictionary<string, string> synonymToMaster, Dictionary<string, bool> unwantedWords, HashSet<string> allMasterTerms, Dictionary<string, string> masterTermCategories)
         {
             FlatSet = flat;
             KeywordSources = sources;
@@ -136,6 +139,7 @@ namespace ShotDeck.Keywords
             SynonymToMaster = synonymToMaster;
             UnwantedWords = unwantedWords;
             AllMasterTerms = allMasterTerms;
+            MasterTermCategories = masterTermCategories;
         }
     }
     public class KeywordCacheService : IKeywordCacheService
@@ -463,6 +467,14 @@ namespace ShotDeck.Keywords
         {
             EnsureWarmOrCsvThenBackgroundRefresh();
             return _snapshot.AllMasterTerms;
+        }
+        public string? GetSynonymCategory(string keyword)
+        {
+            EnsureWarmOrCsvThenBackgroundRefresh();
+            if (string.IsNullOrWhiteSpace(keyword)) return null;
+            var snap = _snapshot;
+            var canonical = Canonicalize(keyword);
+            return snap.MasterTermCategories.TryGetValue(canonical, out var category) ? category : null;
         }
         public CensorshipCheckResult CheckCensorship(string text)
         {
@@ -833,12 +845,15 @@ namespace ShotDeck.Keywords
             var superBlacklistCount = unwantedWords.Count(kv => kv.Value);
             Console.WriteLine($"[KeywordCache] Unwanted words loaded: {unwantedWords.Count}, Super blacklist: {superBlacklistCount}");
             
+            var masterTermCategories = await FetchMasterTermCategories(conn);
+            Console.WriteLine($"[KeywordCache] Master term categories loaded: {masterTermCategories.Count}");
+            
             var newMatcher = new PhraseMatcher(newSet);
-            var newSnapshot = new KeywordSnapshot(newSet, newSources, newByCategory, newMatcher, synonymToMaster, unwantedWords, allMasterTerms);
+            var newSnapshot = new KeywordSnapshot(newSet, newSources, newByCategory, newMatcher, synonymToMaster, unwantedWords, allMasterTerms, masterTermCategories);
             SaveSnapshotToCsv(newSnapshot);
             Interlocked.Exchange(ref _snapshot, newSnapshot);
             PublishStatus();
-            Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}, unwanted={_snapshot.UnwantedWords.Count}, masters={_snapshot.AllMasterTerms.Count}");
+            Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}, unwanted={_snapshot.UnwantedWords.Count}, masters={_snapshot.AllMasterTerms.Count}, masterCats={_snapshot.MasterTermCategories.Count}");
         }
         private static async Task<(Dictionary<string, string> SynonymToMaster, HashSet<string> AllMasterTerms)> FetchSynonymToMasterMapAndMasters(NpgsqlConnection conn)
         {
@@ -893,6 +908,29 @@ namespace ShotDeck.Keywords
             
             return unwantedWords;
         }
+        private static async Task<Dictionary<string, string>> FetchMasterTermCategories(NpgsqlConnection conn)
+        {
+            var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            
+            const string sql = @"
+                SELECT m.master_term, c.category_name 
+                FROM frl.frl_keywords_synonyms_master m 
+                JOIN frl.frl_keywords_synonyms_category c ON m.category_id = c.id 
+                WHERE m.is_included = true AND m.category_id IS NOT NULL;";
+            using var cmd = new NpgsqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+            
+            while (await reader.ReadAsync())
+            {
+                if (reader.IsDBNull(0) || reader.IsDBNull(1)) continue;
+                var masterTerm = reader.GetString(0)?.Trim();
+                var categoryName = reader.GetString(1)?.Trim();
+                if (string.IsNullOrWhiteSpace(masterTerm) || string.IsNullOrWhiteSpace(categoryName)) continue;
+                categories[masterTerm] = categoryName;
+            }
+            
+            return categories;
+        }
         private bool TryWarmFromCsv(out KeywordSnapshot snapshot)
         {
             snapshot = KeywordSnapshot.Empty;
@@ -904,6 +942,7 @@ namespace ShotDeck.Keywords
                 var synPath = Path.Combine(_csvDir, KeywordSnapshot.SynonymsFile);
                 var unwantedPath = Path.Combine(_csvDir, KeywordSnapshot.UnwantedWordsFile);
                 var masterTermsPath = Path.Combine(_csvDir, KeywordSnapshot.MasterTermsFile);
+                var masterTermCategoriesPath = Path.Combine(_csvDir, KeywordSnapshot.MasterTermCategoriesFile);
                 if (!File.Exists(flatPath) || !File.Exists(sourcesPath) || !File.Exists(byCatPath)) return false;
                 var flat = LoadFlatSet(flatPath);
                 var sources = LoadKeywordSources(sourcesPath);
@@ -916,9 +955,12 @@ namespace ShotDeck.Keywords
                 var masterTerms = File.Exists(masterTermsPath) 
                     ? LoadMasterTerms(masterTermsPath) 
                     : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var masterTermCategories = File.Exists(masterTermCategoriesPath)
+                    ? LoadMasterTermCategories(masterTermCategoriesPath)
+                    : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 if (flat.Count == 0) return false;
                 var matcher = new PhraseMatcher(flat);
-                snapshot = new KeywordSnapshot(flat, sources, byCat, matcher, synonyms, unwantedWords, masterTerms);
+                snapshot = new KeywordSnapshot(flat, sources, byCat, matcher, synonyms, unwantedWords, masterTerms, masterTermCategories);
                 return true;
             }
             catch (Exception ex)
@@ -1023,6 +1065,19 @@ namespace ShotDeck.Keywords
             }
             return set;
         }
+        private static Dictionary<string, string> LoadMasterTermCategories(string path)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in File.ReadLines(path, Encoding.UTF8))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                if (line.StartsWith("master_term,category", StringComparison.OrdinalIgnoreCase)) continue;
+                var (a, b) = SplitCsv2(line);
+                if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b)) continue;
+                map[Uncsv(a)] = Uncsv(b);
+            }
+            return map;
+        }
         private static (string A, string B) SplitCsv2(string line)
         {
             string a,
@@ -1118,6 +1173,13 @@ namespace ShotDeck.Keywords
                 var masterTermsLines = new List<string>(snap.AllMasterTerms.Count + 1) { "master_term" };
                 masterTermsLines.AddRange(snap.AllMasterTerms.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Select(Csv));
                 File.WriteAllLines(Path.Combine(_csvDir, KeywordSnapshot.MasterTermsFile), masterTermsLines, Encoding.UTF8);
+                
+                var masterTermCategoriesLines = new List<string>(snap.MasterTermCategories.Count + 1) { "master_term,category" };
+                foreach (var kv in snap.MasterTermCategories.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    masterTermCategoriesLines.Add($"{Csv(kv.Key)},{Csv(kv.Value)}");
+                }
+                File.WriteAllLines(Path.Combine(_csvDir, KeywordSnapshot.MasterTermCategoriesFile), masterTermCategoriesLines, Encoding.UTF8);
                 
                 Console.WriteLine($"[KeywordCacheService] Snapshot CSVs written to {_csvDir}");
             }

@@ -401,6 +401,15 @@ namespace ShotDeckSearch.Controllers
                     var key = k.Trim();
 
                     // -----------------------------------------
+                    // 0) Check for synonym category - this takes priority
+                    // -----------------------------------------
+                    var synonymCategory = _keywordCache.GetSynonymCategory(key);
+                    if (!string.IsNullOrWhiteSpace(synonymCategory))
+                    {
+                        return new KeywordResult(key, new List<string> { synonymCategory });
+                    }
+
+                    // -----------------------------------------
                     // 1) Build category set from keyword cache
                     // -----------------------------------------
                     var catSet = kwToCats.TryGetValue(key, out var set)
