@@ -401,16 +401,48 @@ namespace ShotDeckSearch.Controllers
                     var key = k.Trim();
 
                     // -----------------------------------------
-                    // 0) Check for synonym category - this takes priority
+                    // 0) Detect intent FIRST (before synonym category check)
+                    // -----------------------------------------
+                    // Use the term that actually appears in the prompt for intent detection.
+                    // If the canonical key isn't present, try its synonyms and pick the first match found.
+                    string intentTerm = key;
+
+                    if (!string.IsNullOrWhiteSpace(rawPrompt))
+                    {
+                        var lowerPrompt = cueInfo.Lower; // already lower-cased prompt
+
+                        if (lowerPrompt.IndexOf(key.ToLowerInvariant(), StringComparison.Ordinal) < 0)
+                        {
+                            var syns = _keywordCache.GetSynonymsForMaster(key);
+                            foreach (var syn in syns)
+                            {
+                                if (string.IsNullOrWhiteSpace(syn)) continue;
+
+                                if (lowerPrompt.IndexOf(syn.ToLowerInvariant(), StringComparison.Ordinal) >= 0)
+                                {
+                                    intentTerm = syn;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    var (wantDirector, wantActing, wantCine, wantProd, wantCostume, wantTitle) =
+                        GetLocalIntentForKeyword(rawPrompt, cueInfo, intentTerm);
+
+                    bool hasAnyIntentCue = wantDirector || wantActing || wantCine || wantProd || wantCostume || wantTitle;
+
+                    // -----------------------------------------
+                    // 1) Check for synonym category - only use if NO intent cues detected
                     // -----------------------------------------
                     var synonymCategory = _keywordCache.GetSynonymCategory(key);
-                    if (!string.IsNullOrWhiteSpace(synonymCategory))
+                    if (!string.IsNullOrWhiteSpace(synonymCategory) && !hasAnyIntentCue)
                     {
                         return new KeywordResult(key, new List<string> { synonymCategory });
                     }
 
                     // -----------------------------------------
-                    // 1) Build category set from keyword cache
+                    // 2) Build category set from keyword cache
                     // -----------------------------------------
                     var catSet = kwToCats.TryGetValue(key, out var set)
                         ? new HashSet<string>(set, StringComparer.OrdinalIgnoreCase)
@@ -450,36 +482,6 @@ namespace ShotDeckSearch.Controllers
                     {
                         catSet.Add("Keywords");
                     }
-
-                    // -----------------------------------------
-                    // 2) Local intent detection (cue proximity)
-                    // -----------------------------------------
-                    // Use the term that actually appears in the prompt for intent detection.
-                    // If the canonical key isn't present, try its synonyms and pick the first match found.
-                    string intentTerm = key;
-
-                    if (!string.IsNullOrWhiteSpace(rawPrompt))
-                    {
-                        var lowerPrompt = cueInfo.Lower; // already lower-cased prompt
-
-                        if (lowerPrompt.IndexOf(key.ToLowerInvariant(), StringComparison.Ordinal) < 0)
-                        {
-                            var syns = _keywordCache.GetSynonymsForMaster(key);
-                            foreach (var syn in syns)
-                            {
-                                if (string.IsNullOrWhiteSpace(syn)) continue;
-
-                                if (lowerPrompt.IndexOf(syn.ToLowerInvariant(), StringComparison.Ordinal) >= 0)
-                                {
-                                    intentTerm = syn;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    var (wantDirector, wantActing, wantCine, wantProd, wantCostume, wantTitle) =
-                        GetLocalIntentForKeyword(rawPrompt, cueInfo, intentTerm);
 
                     // Forced title extracted via regex
                     bool isForcedTitle = !string.IsNullOrWhiteSpace(forcedMovieTitle) &&
