@@ -7,8 +7,8 @@ namespace ShotDeckSearch.Tests
         [Fact(DisplayName = "Force fail to block build")]
         public void PipelineShouldFail()
         {
-            //Assert.True(false, "Simulated pipeline failure from xUnit test.");
-            Assert.True(true);
+            Assert.True(false, "Simulated pipeline failure from xUnit test.");
+            //Assert.True(true);
         }
     }
 }
