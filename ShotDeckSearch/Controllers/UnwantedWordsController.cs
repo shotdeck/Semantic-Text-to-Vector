@@ -29,6 +29,17 @@ namespace ShotDeckSearch.Controllers
             _logger = logger;
         }
 
+        [HttpGet("test")]
+        public IActionResult Test()
+        {
+            // Always returns 200 to verify the app runs
+            return Ok(new
+            {
+                status = "It worked",
+                time = DateTime.UtcNow
+            });
+        }
+
         /// <summary>
         /// GET /api/admin/unwanted-words
         /// Returns all unwanted words from the database.
