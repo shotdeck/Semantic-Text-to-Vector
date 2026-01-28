@@ -66,6 +66,19 @@ namespace ShotDeckSearch.Controllers
             return password == configuredPassword;
         }
 
+        [HttpGet("check-unwanted-words-password")]
+        public ActionResult<bool> CheckUnwantedWordsPassword([FromQuery] string password)
+        {
+            if (string.IsNullOrEmpty(password))
+                return false;
+
+            var configuredPassword = _configuration["UNWANTEDWORDSPASSWORD"];
+
+            if (string.IsNullOrEmpty(configuredPassword))
+                return false;
+
+            return password == configuredPassword;
+        }
 
 
         [HttpGet("word-in-keywords")]
