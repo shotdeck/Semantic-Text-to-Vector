@@ -337,20 +337,8 @@ namespace ShotDeckSearch.Controllers
                     string.Join(" | ", classified.Include),
                     string.Join(" | ", classified.Exclude));
 
-                // 2) keyword -> categories map
-                var byCategory = _keywordCache.GetKeywordsByCategory();
-                var kwToCats = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-                foreach (var kv in byCategory)
-                {
-                    foreach (var kw in kv.Value ?? Enumerable.Empty<string>())
-                    {
-                        if (!kwToCats.TryGetValue(kw, out var set))
-                            set = kwToCats[kw] = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                        set.Add(kv.Key);
-                    }
-                }
+                // 2) keyword -> categories map (pre-computed in snapshot)
+                var kwToCats = _keywordCache.GetKeywordToCategories();
 
 
                 // 3) Canonicalize include/exclude for output
@@ -725,29 +713,33 @@ namespace ShotDeckSearch.Controllers
         ///   "from a movie called The Shining"
         ///   "in the film called Alien"
         /// </summary>
+        private static readonly Regex MovieTitleRx = new(
+            @"(?:from|in)\s+(?:a\s+|the\s+)?movie\s+(?:called\s+)?(?<title>[A-Za-z0-9][A-Za-z0-9\s:'\-]*)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+        private static readonly Regex FilmTitleRx = new(
+            @"(?:from|in)\s+(?:a\s+|the\s+)?film\s+(?:called\s+)?(?<title>[A-Za-z0-9][A-Za-z0-9\s:'\-]*)",
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+        private static readonly Regex TrailingPunctuationRx = new(
+            @"[.,;:!?]+$",
+            RegexOptions.Compiled);
+
         private static string? ExtractExplicitMovieTitle(string prompt)
         {
             if (string.IsNullOrWhiteSpace(prompt))
                 return null;
 
-            var m = Regex.Match(
-                prompt,
-                @"(?:from|in)\s+(?:a\s+|the\s+)?movie\s+(?:called\s+)?(?<title>[A-Za-z0-9][A-Za-z0-9\s:'\-]*)",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            var m = MovieTitleRx.Match(prompt);
 
             if (!m.Success)
-            {
-                m = Regex.Match(
-                    prompt,
-                    @"(?:from|in)\s+(?:a\s+|the\s+)?film\s+(?:called\s+)?(?<title>[A-Za-z0-9][A-Za-z0-9\s:'\-]*)",
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-            }
+                m = FilmTitleRx.Match(prompt);
 
             if (!m.Success)
                 return null;
 
             var raw = m.Groups["title"].Value.Trim();
-            raw = Regex.Replace(raw, @"[.,;:!?]+$", "").Trim();
+            raw = TrailingPunctuationRx.Replace(raw, "").Trim();
             return string.IsNullOrWhiteSpace(raw) ? null : raw;
         }
 
@@ -892,18 +884,29 @@ namespace ShotDeckSearch.Controllers
             return tokens.ToArray();
         }
 
-        // ✅ Finds all whole-word occurrences (fixes "kid ... directed by kid")
+        // Finds all whole-word occurrences without dynamic Regex allocation
         private static List<int> FindAllWholeWordPositions(string lowerPrompt, string keyword)
         {
             if (string.IsNullOrWhiteSpace(lowerPrompt) || string.IsNullOrWhiteSpace(keyword))
                 return new List<int>();
 
-            var rx = new Regex(@"\b" + Regex.Escape(keyword.ToLowerInvariant()) + @"\b",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-
             var list = new List<int>();
-            foreach (Match m in rx.Matches(lowerPrompt))
-                if (m.Success) list.Add(m.Index);
+            var lowerKw = keyword.ToLowerInvariant();
+            int searchFrom = 0;
+            while (searchFrom <= lowerPrompt.Length - lowerKw.Length)
+            {
+                int idx = lowerPrompt.IndexOf(lowerKw, searchFrom, StringComparison.Ordinal);
+                if (idx < 0) break;
+
+                bool beforeOk = idx == 0 || !char.IsLetterOrDigit(lowerPrompt[idx - 1]);
+                int afterIdx = idx + lowerKw.Length;
+                bool afterOk = afterIdx >= lowerPrompt.Length || !char.IsLetterOrDigit(lowerPrompt[afterIdx]);
+
+                if (beforeOk && afterOk)
+                    list.Add(idx);
+
+                searchFrom = idx + 1;
+            }
 
             return list;
         }

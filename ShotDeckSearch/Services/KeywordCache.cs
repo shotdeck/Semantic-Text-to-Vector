@@ -37,6 +37,7 @@ namespace ShotDeck.Keywords
         CensorshipCheckResult CheckCensorship(string text);
         IReadOnlyCollection<string> GetAllSynonymMasters();
         string? GetSynonymCategory(string keyword);
+        IReadOnlyDictionary<string, HashSet<string>> GetKeywordToCategories();
     }
     public sealed class CensorshipCheckResult
     {
@@ -122,6 +123,9 @@ namespace ShotDeck.Keywords
         public readonly Dictionary<string, bool> UnwantedWords;
         public readonly HashSet<string> AllMasterTerms;
         public readonly Dictionary<string, string> MasterTermCategories;
+        public readonly Dictionary<string, List<string>> MasterToSynonyms;
+        public readonly Dictionary<string, HashSet<string>> KeywordToCategories;
+        public readonly Dictionary<string, string> NormalizedUnwantedWords;
         internal static readonly string FlatFile = "keywords_flat.csv";
         internal static readonly string SourcesFile = "keyword_sources.csv";
         internal static readonly string ByCategoryFile = "keywords_by_category.csv";
@@ -140,6 +144,65 @@ namespace ShotDeck.Keywords
             UnwantedWords = unwantedWords;
             AllMasterTerms = allMasterTerms;
             MasterTermCategories = masterTermCategories;
+
+            // Pre-compute MasterToSynonyms inverse map
+            var m2s = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in synonymToMaster)
+            {
+                if (!m2s.TryGetValue(kv.Value, out var list))
+                    m2s[kv.Value] = list = new List<string>();
+                list.Add(kv.Key);
+            }
+            MasterToSynonyms = m2s;
+
+            // Pre-compute KeywordToCategories reverse map
+            var kwCats = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in byCategory)
+            {
+                foreach (var kw in kv.Value ?? new List<string>())
+                {
+                    if (!kwCats.TryGetValue(kw, out var set))
+                        kwCats[kw] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    set.Add(kv.Key);
+                }
+            }
+            KeywordToCategories = kwCats;
+
+            // Pre-compute normalized unwanted words for censorship checks
+            var normUnwanted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in unwantedWords)
+            {
+                normUnwanted[kv.Key] = NormalizeCensorship(kv.Key);
+            }
+            NormalizedUnwantedWords = normUnwanted;
+        }
+
+        internal static string NormalizeCensorship(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            var sb = new StringBuilder(text.Length);
+            foreach (var c in text.ToLowerInvariant())
+            {
+                var normalized = c switch
+                {
+                    '0' => 'o',
+                    '1' => 'i',
+                    '3' => 'e',
+                    '4' => 'a',
+                    '5' => 's',
+                    '7' => 't',
+                    '8' => 'b',
+                    '@' => 'a',
+                    '$' => 's',
+                    '!' => 'i',
+                    '+' => 't',
+                    '-' or '_' or '.' or ',' or '*' or '#' or '~' or '`' or '\'' or '"' => '\0',
+                    _ => c
+                };
+                if (normalized != '\0')
+                    sb.Append(normalized);
+            }
+            return sb.ToString();
         }
     }
     public class KeywordCacheService : IKeywordCacheService
@@ -371,21 +434,15 @@ namespace ShotDeck.Keywords
         {
             EnsureWarmOrCsvThenBackgroundRefresh();
             return _snapshot.KeywordSources.TryGetValue(keyword, out
-            var set) ? (IReadOnlyCollection<string>)set.ToList() : Array.Empty<string>();
+            var set) ? (IReadOnlyCollection<string>)set : Array.Empty<string>();
         }
         public IReadOnlyCollection<string> GetSynonymsForMaster(string master)
         {
             EnsureWarmOrCsvThenBackgroundRefresh();
             if (string.IsNullOrWhiteSpace(master)) return Array.Empty<string>();
             var snap = _snapshot;
-            // Build inverse map on the fly (fast enough unless your synonym list is huge). 
-            // If it is huge, we can store Master->Synonyms in the snapshot (next step). 
-            var list = new List<string>();
-            foreach (var kv in snap.SynonymToMaster)
-            {
-                if (kv.Value.Equals(master, StringComparison.OrdinalIgnoreCase)) list.Add(kv.Key);
-            }
-            return list;
+            return snap.MasterToSynonyms.TryGetValue(master, out var list)
+                ? list : (IReadOnlyCollection<string>)Array.Empty<string>();
         }
         public List<string> Search(string text)
         {
@@ -476,6 +533,11 @@ namespace ShotDeck.Keywords
             var canonical = Canonicalize(keyword);
             return snap.MasterTermCategories.TryGetValue(canonical, out var category) ? category : null;
         }
+        public IReadOnlyDictionary<string, HashSet<string>> GetKeywordToCategories()
+        {
+            EnsureWarmOrCsvThenBackgroundRefresh();
+            return _snapshot.KeywordToCategories;
+        }
         public CensorshipCheckResult CheckCensorship(string text)
         {
             EnsureWarmOrCsvThenBackgroundRefresh();
@@ -492,14 +554,15 @@ namespace ShotDeck.Keywords
 
             var snap = _snapshot;
             var originalText = text;
-            var normalizedText = NormalizeForCensorshipCheck(text);
+            var normalizedText = KeywordSnapshot.NormalizeCensorship(text);
             var lowerText = text.ToLowerInvariant();
 
             foreach (var kv in snap.UnwantedWords)
             {
                 var unwantedWord = kv.Key;
                 var isSuperBlacklist = kv.Value;
-                var normalizedUnwanted = NormalizeForCensorshipCheck(unwantedWord);
+                var normalizedUnwanted = snap.NormalizedUnwantedWords.TryGetValue(unwantedWord, out var cached)
+                    ? cached : KeywordSnapshot.NormalizeCensorship(unwantedWord);
                 var lowerUnwanted = unwantedWord.ToLowerInvariant();
 
                 bool foundMatch = false;

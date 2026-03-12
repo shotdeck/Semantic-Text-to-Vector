@@ -20,18 +20,22 @@ builder.Services.AddApplicationInsightsTelemetry(options =>
 // SSH tunnel (optional, you had this)
 builder.Services.AddHostedService<SshTunnelService>();
 
-// Database connection (scoped)
-builder.Services.AddScoped<NpgsqlConnection>(sp =>
+// Database connection (scoped, lazy – only opened when first accessed)
+builder.Services.AddScoped<Lazy<NpgsqlConnection>>(sp =>
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    
-    var connStr = builder.Configuration["ConnectionStrings:Default"]
-        ?? throw new InvalidOperationException("DefaultConnection is not configured.");
+    return new Lazy<NpgsqlConnection>(() =>
+    {
+        var connStr = builder.Configuration["ConnectionStrings:Default"]
+            ?? throw new InvalidOperationException("DefaultConnection is not configured.");
 
-    var conn = new NpgsqlConnection(connStr);
-    conn.Open(); // connection is opened per scope
-    return conn;
+        var conn = new NpgsqlConnection(connStr);
+        conn.Open();
+        return conn;
+    });
 });
+
+// Keep NpgsqlConnection resolvable for code that injects it directly
+builder.Services.AddScoped<NpgsqlConnection>(sp => sp.GetRequiredService<Lazy<NpgsqlConnection>>().Value);
 
 // Keyword caching (singleton) - also includes unwanted words caching
 builder.Services.AddSingleton<IKeywordCacheService, KeywordCacheService>();
