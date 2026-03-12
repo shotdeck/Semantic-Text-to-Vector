@@ -267,6 +267,7 @@ namespace ShotDeckSearch.Controllers
      .Replace("’", "");
 
 
+
                 var rawPrompt = prompt;
 
                 var censorshipResult = _keywordCache.CheckCensorship(rawPrompt);
