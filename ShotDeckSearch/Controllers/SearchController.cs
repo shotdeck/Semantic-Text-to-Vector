@@ -28,20 +28,22 @@ namespace ShotDeckSearch.Controllers
     [ApiController]
     public class SearchController : ControllerBase
     {
-        private readonly NpgsqlConnection _connection;
+        private readonly Lazy<NpgsqlConnection> _lazyConnection;
         private readonly IConfiguration _configuration;
         private readonly IKeywordCacheService _keywordCache;
         private readonly ILogger<SearchController> _logger;
 
+        private NpgsqlConnection _connection => _lazyConnection.Value;
+
         private sealed record KeywordResult(string Keyword, List<string> Categories);
 
         public SearchController(
-            NpgsqlConnection connection,
+            Lazy<NpgsqlConnection> lazyConnection,
             IConfiguration configuration,
             IKeywordCacheService keywordCache,
             ILogger<SearchController> logger)
         {
-            _connection = connection;
+            _lazyConnection = lazyConnection;
             _configuration = configuration;
             _keywordCache = keywordCache;
             _logger = logger;
