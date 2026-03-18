@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Npgsql;
@@ -26,13 +26,11 @@ namespace ShotDeckSearch.Controllers
             _logger = logger;
         }
 
-        /// <summary>
-        /// GET /api/admin/tag-popularity
-        /// Returns all tags from the tag popularity rules.
-        /// </summary>
         [HttpGet]
         [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
-        public async Task<ActionResult<List<string>>> GetAll(CancellationToken ct)
+        public async Task<ActionResult<List<string>>> GetAll(
+    [FromQuery] string? tag,
+    CancellationToken ct)
         {
             var mustClose = false;
             if (_connection.State != ConnectionState.Open)
@@ -43,12 +41,30 @@ namespace ShotDeckSearch.Controllers
 
             try
             {
-                const string sql = @"
+                string sql;
+                await using var cmd = new NpgsqlCommand();
+                cmd.Connection = _connection;
+
+                if (string.IsNullOrWhiteSpace(tag))
+                {
+                    sql = @"
 SELECT tag
 FROM frl.frl_popularity_tag_rules
 ORDER BY tag;";
+                }
+                else
+                {
+                    sql = @"
+SELECT tag
+FROM frl.frl_popularity_tag_rules
+WHERE tag ILIKE @tag
+ORDER BY tag;";
 
-                await using var cmd = new NpgsqlCommand(sql, _connection);
+                    cmd.Parameters.AddWithValue("@tag", $"%{tag.Trim()}%");
+                }
+
+                cmd.CommandText = sql;
+
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
                 var results = new List<string>();
