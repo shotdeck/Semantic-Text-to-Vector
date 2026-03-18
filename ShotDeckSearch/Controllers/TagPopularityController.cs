@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
+using ShotDeck.Keywords;
 using System.Data;
 
 namespace ShotDeckSearch.Controllers
@@ -12,13 +13,16 @@ namespace ShotDeckSearch.Controllers
     public sealed class TagPopularityController : ControllerBase
     {
         private readonly NpgsqlConnection _connection;
+        private readonly IKeywordCacheService _keywordCache;
         private readonly ILogger<TagPopularityController> _logger;
 
         public TagPopularityController(
             NpgsqlConnection connection,
+            IKeywordCacheService keywordCache,
             ILogger<TagPopularityController> logger)
         {
             _connection = connection;
+            _keywordCache = keywordCache;
             _logger = logger;
         }
 
@@ -101,47 +105,25 @@ WHERE id = @id;";
 
         /// <summary>
         /// GET /api/admin/tag-popularity/search?tag={tag}
-        /// Searches distinct tags from frl_join_images_tags by tag (case-insensitive partial match).
+        /// Searches tags from the in-memory cache (case-insensitive partial match).
         /// </summary>
         [HttpGet("search")]
         [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<ActionResult<List<string>>> SearchByTag([FromQuery] string tag, CancellationToken ct)
+        public ActionResult<List<string>> SearchByTag([FromQuery] string tag)
         {
             if (string.IsNullOrWhiteSpace(tag))
                 return BadRequest(new { Message = "Tag query parameter is required." });
 
-            var mustClose = false;
-            if (_connection.State != ConnectionState.Open)
-            {
-                await _connection.OpenAsync(ct);
-                mustClose = true;
-            }
+            var query = tag.Trim();
+            var allTags = _keywordCache.GetImageTags();
 
-            try
-            {
-                const string sql = @"
-SELECT DISTINCT tag
-FROM frl.frl_join_images_tags
-WHERE tag ILIKE @tag
-ORDER BY tag;";
+            var results = allTags
+                .Where(t => t.Contains(query, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-                await using var cmd = new NpgsqlCommand(sql, _connection);
-                cmd.Parameters.AddWithValue("@tag", "%" + tag.Trim() + "%");
-                await using var reader = await cmd.ExecuteReaderAsync(ct);
-
-                var results = new List<string>();
-                while (await reader.ReadAsync(ct))
-                {
-                    results.Add(reader.GetString(0));
-                }
-
-                return Ok(results);
-            }
-            finally
-            {
-                if (mustClose) await _connection.CloseAsync();
-            }
+            return Ok(results);
         }
 
         /// <summary>
