@@ -24,11 +24,11 @@ namespace ShotDeckSearch.Controllers
 
         /// <summary>
         /// GET /api/admin/tag-popularity
-        /// Returns all tag popularity rules from the database.
+        /// Returns all tags from the tag popularity rules.
         /// </summary>
         [HttpGet]
-        [ProducesResponseType(typeof(List<TagPopularityRuleDto>), StatusCodes.Status200OK)]
-        public async Task<ActionResult<List<TagPopularityRuleDto>>> GetAll(CancellationToken ct)
+        [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<List<string>>> GetAll(CancellationToken ct)
         {
             var mustClose = false;
             if (_connection.State != ConnectionState.Open)
@@ -40,17 +40,17 @@ namespace ShotDeckSearch.Controllers
             try
             {
                 const string sql = @"
-SELECT id, tag, percentage, is_active, created_at, updated_at
+SELECT tag
 FROM frl.frl_popularity_tag_rules
 ORDER BY tag;";
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-                var results = new List<TagPopularityRuleDto>();
+                var results = new List<string>();
                 while (await reader.ReadAsync(ct))
                 {
-                    results.Add(MapToDto(reader));
+                    results.Add(reader.GetString(0));
                 }
 
                 return Ok(results);
@@ -101,12 +101,12 @@ WHERE id = @id;";
 
         /// <summary>
         /// GET /api/admin/tag-popularity/search?tag={tag}
-        /// Searches tag popularity rules by tag (case-insensitive partial match).
+        /// Searches distinct tags from frl_join_images_tags by tag (case-insensitive partial match).
         /// </summary>
         [HttpGet("search")]
-        [ProducesResponseType(typeof(List<TagPopularityRuleDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<ActionResult<List<TagPopularityRuleDto>>> SearchByTag([FromQuery] string tag, CancellationToken ct)
+        public async Task<ActionResult<List<string>>> SearchByTag([FromQuery] string tag, CancellationToken ct)
         {
             if (string.IsNullOrWhiteSpace(tag))
                 return BadRequest(new { Message = "Tag query parameter is required." });
@@ -121,8 +121,8 @@ WHERE id = @id;";
             try
             {
                 const string sql = @"
-SELECT id, tag, percentage, is_active, created_at, updated_at
-FROM frl.frl_popularity_tag_rules
+SELECT DISTINCT tag
+FROM frl.frl_join_images_tags
 WHERE tag ILIKE @tag
 ORDER BY tag;";
 
@@ -130,10 +130,10 @@ ORDER BY tag;";
                 cmd.Parameters.AddWithValue("@tag", "%" + tag.Trim() + "%");
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-                var results = new List<TagPopularityRuleDto>();
+                var results = new List<string>();
                 while (await reader.ReadAsync(ct))
                 {
-                    results.Add(MapToDto(reader));
+                    results.Add(reader.GetString(0));
                 }
 
                 return Ok(results);
