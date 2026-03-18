@@ -158,6 +158,11 @@ WHERE id = @id;";
             if (request.Percentage < -100 || request.Percentage > 1000)
                 return BadRequest(new { Message = "Percentage must be between -100 and 1000." });
 
+            var trimmedTag = request.Tag.Trim();
+            var imageTags = _keywordCache.GetImageTags();
+            if (!imageTags.Any(t => t.Equals(trimmedTag, StringComparison.OrdinalIgnoreCase)))
+                return BadRequest(new { Message = $"Tag '{trimmedTag}' does not exist in the image tags. Please select a valid tag." });
+
             var mustClose = false;
             if (_connection.State != ConnectionState.Open)
             {
