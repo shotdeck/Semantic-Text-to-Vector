@@ -208,7 +208,7 @@ namespace ShotDeckSearch.Controllers
                 if (matchedKeyword == null)
                 {
                     var imageTags = _keywordCache.GetImageTags();
-                    if (imageTags.Any(t => t.Equals(term, StringComparison.OrdinalIgnoreCase)))
+                    if (imageTags.Contains(term))
                     {
                         matchedKeyword = term;
                         foundInTags = true;
