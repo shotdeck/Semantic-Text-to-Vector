@@ -100,6 +100,51 @@ WHERE id = @id;";
         }
 
         /// <summary>
+        /// GET /api/admin/tag-popularity/search?tag={tag}
+        /// Searches tag popularity rules by tag (case-insensitive partial match).
+        /// </summary>
+        [HttpGet("search")]
+        [ProducesResponseType(typeof(List<TagPopularityRuleDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<List<TagPopularityRuleDto>>> SearchByTag([FromQuery] string tag, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(tag))
+                return BadRequest(new { Message = "Tag query parameter is required." });
+
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                const string sql = @"
+SELECT id, tag, percentage, is_active, created_at, updated_at
+FROM frl.frl_popularity_tag_rules
+WHERE tag ILIKE @tag
+ORDER BY tag;";
+
+                await using var cmd = new NpgsqlCommand(sql, _connection);
+                cmd.Parameters.AddWithValue("@tag", "%" + tag.Trim() + "%");
+                await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+                var results = new List<TagPopularityRuleDto>();
+                while (await reader.ReadAsync(ct))
+                {
+                    results.Add(MapToDto(reader));
+                }
+
+                return Ok(results);
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
+        /// <summary>
         /// POST /api/admin/tag-popularity
         /// Creates a new tag popularity rule.
         /// </summary>
