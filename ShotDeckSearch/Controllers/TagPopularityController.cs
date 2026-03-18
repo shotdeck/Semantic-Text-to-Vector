@@ -170,18 +170,14 @@ ORDER BY tag;";
             try
             {
                 const string sql = @"
-INSERT INTO frl.frl_popularity_tag_rules (tag, percentage, is_active, created_at, updated_at)
-VALUES (@tag, @percentage, @is_active, @created_at, @updated_at)
+INSERT INTO frl.frl_popularity_tag_rules (tag, percentage, is_active)
+VALUES (@tag, @percentage, @is_active)
 RETURNING id, tag, percentage, is_active, created_at, updated_at;";
-
-                var now = DateTime.UtcNow;
 
                 await using var cmd = new NpgsqlCommand(sql, _connection);
                 cmd.Parameters.AddWithValue("@tag", request.Tag.Trim());
                 cmd.Parameters.AddWithValue("@percentage", request.Percentage);
                 cmd.Parameters.AddWithValue("@is_active", request.IsActive ?? true);
-                cmd.Parameters.AddWithValue("@created_at", request.CreatedAt ?? now);
-                cmd.Parameters.AddWithValue("@updated_at", request.UpdatedAt ?? now);
 
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -232,7 +228,7 @@ UPDATE frl.frl_popularity_tag_rules
 SET tag = @tag,
     percentage = @percentage,
     is_active = @is_active,
-    updated_at = @updated_at
+    updated_at = now()
 WHERE id = @id
 RETURNING id, tag, percentage, is_active, created_at, updated_at;";
 
@@ -241,7 +237,6 @@ RETURNING id, tag, percentage, is_active, created_at, updated_at;";
                 cmd.Parameters.AddWithValue("@tag", request.Tag.Trim());
                 cmd.Parameters.AddWithValue("@percentage", request.Percentage);
                 cmd.Parameters.AddWithValue("@is_active", request.IsActive ?? true);
-                cmd.Parameters.AddWithValue("@updated_at", request.UpdatedAt ?? DateTime.UtcNow);
 
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
@@ -329,8 +324,6 @@ RETURNING id, tag, percentage, is_active, created_at, updated_at;";
             public string? Tag { get; set; }
             public int Percentage { get; set; }
             public bool? IsActive { get; set; }
-            public DateTime? CreatedAt { get; set; }
-            public DateTime? UpdatedAt { get; set; }
         }
 
         public sealed class UpdateTagPopularityRuleRequest
@@ -338,7 +331,6 @@ RETURNING id, tag, percentage, is_active, created_at, updated_at;";
             public string? Tag { get; set; }
             public int Percentage { get; set; }
             public bool? IsActive { get; set; }
-            public DateTime? UpdatedAt { get; set; }
         }
 
         #endregion
