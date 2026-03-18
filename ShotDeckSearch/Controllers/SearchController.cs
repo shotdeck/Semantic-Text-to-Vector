@@ -161,7 +161,7 @@ namespace ShotDeckSearch.Controllers
             => Ok((_keywordCache as KeywordCacheService)?.GetKeywordCacheStatus());
 
         [HttpPost("diagnose-categories")]
-        public async Task<IActionResult> DiagnoseCategories([FromBody] List<string> terms)
+        public IActionResult DiagnoseCategories([FromBody] List<string> terms)
         {
             if (terms == null || terms.Count == 0)
                 return Ok(new { results = new object[0] });
@@ -203,18 +203,14 @@ namespace ShotDeckSearch.Controllers
                         matchedKeyword = hits.OrderByDescending(h => h.Length).First();
                 }
 
-                // 3) If still not found, fallback to DB search in frl_join_images_tags
+                // 3) If still not found, check in-memory image tags from frl_join_images_tags
                 bool foundInTags = false;
                 if (matchedKeyword == null)
                 {
-                    var sql = @"SELECT tag FROM frl_join_images_tags WHERE tag ILIKE @tag LIMIT 1;";
-                    using var cmd = new NpgsqlCommand(sql, _connection);
-                    cmd.Parameters.AddWithValue("tag", term);
-
-                    var db = await cmd.ExecuteScalarAsync();
-                    if (db != null)
+                    var imageTags = _keywordCache.GetImageTags();
+                    if (imageTags.Any(t => t.Equals(term, StringComparison.OrdinalIgnoreCase)))
                     {
-                        matchedKeyword = db.ToString();
+                        matchedKeyword = term;
                         foundInTags = true;
                     }
                 }
