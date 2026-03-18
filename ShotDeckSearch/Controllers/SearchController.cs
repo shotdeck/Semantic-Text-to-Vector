@@ -82,6 +82,20 @@ namespace ShotDeckSearch.Controllers
             return password == configuredPassword;
         }
 
+        [HttpGet("check-tag-popularity-password")]
+        public ActionResult<bool> CheckTagPopularityPassword([FromQuery] string password)
+        {
+            if (string.IsNullOrEmpty(password))
+                return false;
+
+            var configuredPassword = _configuration["UNWANTEDWORDSPASSWORD"];
+
+            if (string.IsNullOrEmpty(configuredPassword))
+                return false;
+
+            return password == configuredPassword;
+        }
+
 
         [HttpGet("word-in-keywords")]
         public ActionResult<List<SearchHitDto>> GetWordInKeywords(string phrase)
