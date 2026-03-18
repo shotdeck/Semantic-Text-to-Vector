@@ -288,6 +288,88 @@ RETURNING id, tag, percentage, is_active, created_at, updated_at;";
             }
         }
 
+        /// <summary>
+        /// POST /api/admin/tag-popularity/apply
+        /// Reads all active rules from frl_popularity_tag_rules updated within the past 6 hours,
+        /// then adjusts frl_images.base_weighted_score by the rule's percentage for each image
+        /// that has the matching tag in frl_join_images_tags.
+        /// </summary>
+        [HttpPost("apply")]
+        [ProducesResponseType(typeof(ApplyRulesResult), StatusCodes.Status200OK)]
+        public async Task<ActionResult<ApplyRulesResult>> ApplyRecentRules(CancellationToken ct)
+        {
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
+            {
+                await _connection.OpenAsync(ct);
+                mustClose = true;
+            }
+
+            try
+            {
+                // Step 1: Read active rules updated within the past 6 hours
+                const string fetchRulesSql = @"
+SELECT id, tag, percentage
+FROM frl.frl_popularity_tag_rules
+WHERE is_active = true
+  AND updated_at >= now() - interval '6 hours';";
+
+                var rules = new List<(long Id, string Tag, int Percentage)>();
+
+                await using (var cmd = new NpgsqlCommand(fetchRulesSql, _connection))
+                await using (var reader = await cmd.ExecuteReaderAsync(ct))
+                {
+                    while (await reader.ReadAsync(ct))
+                    {
+                        rules.Add((reader.GetInt64(0), reader.GetString(1), reader.GetInt32(2)));
+                    }
+                }
+
+                if (rules.Count == 0)
+                    return Ok(new ApplyRulesResult { RulesProcessed = 0, TotalImagesUpdated = 0 });
+
+                // Step 2: For each rule, update frl_images.base_weighted_score
+                const string updateSql = @"
+UPDATE frl.frl_images img
+SET base_weighted_score = img.weighted_score + (img.weighted_score * @percentage / 100.0)
+FROM frl.frl_join_images_tags jit
+WHERE jit.imageid = img.idnum
+  AND jit.tag = @tag;";
+
+                var totalUpdated = 0;
+                var ruleResults = new List<ApplyRuleDetail>();
+
+                foreach (var rule in rules)
+                {
+                    await using var updateCmd = new NpgsqlCommand(updateSql, _connection);
+                    updateCmd.Parameters.AddWithValue("@percentage", rule.Percentage);
+                    updateCmd.Parameters.AddWithValue("@tag", rule.Tag);
+
+                    var rowsAffected = await updateCmd.ExecuteNonQueryAsync(ct);
+                    totalUpdated += rowsAffected;
+
+                    ruleResults.Add(new ApplyRuleDetail
+                    {
+                        RuleId = rule.Id,
+                        Tag = rule.Tag,
+                        Percentage = rule.Percentage,
+                        ImagesUpdated = rowsAffected
+                    });
+                }
+
+                return Ok(new ApplyRulesResult
+                {
+                    RulesProcessed = rules.Count,
+                    TotalImagesUpdated = totalUpdated,
+                    Details = ruleResults
+                });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
+            }
+        }
+
         #region Helpers
 
         private static TagPopularityRuleDto MapToDto(NpgsqlDataReader reader)
@@ -329,6 +411,21 @@ RETURNING id, tag, percentage, is_active, created_at, updated_at;";
             public string? Tag { get; set; }
             public int Percentage { get; set; }
             public bool? IsActive { get; set; }
+        }
+
+        public sealed class ApplyRulesResult
+        {
+            public int RulesProcessed { get; set; }
+            public int TotalImagesUpdated { get; set; }
+            public List<ApplyRuleDetail> Details { get; set; } = new();
+        }
+
+        public sealed class ApplyRuleDetail
+        {
+            public long RuleId { get; set; }
+            public string Tag { get; set; } = default!;
+            public int Percentage { get; set; }
+            public int ImagesUpdated { get; set; }
         }
 
         #endregion
