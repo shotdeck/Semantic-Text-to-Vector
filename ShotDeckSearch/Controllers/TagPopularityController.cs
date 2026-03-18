@@ -27,8 +27,8 @@ namespace ShotDeckSearch.Controllers
         }
 
         [HttpGet]
-        [ProducesResponseType(typeof(List<string>), StatusCodes.Status200OK)]
-        public async Task<ActionResult<List<string>>> GetAll(
+        [ProducesResponseType(typeof(List<TagPopularityRuleDto>), StatusCodes.Status200OK)]
+        public async Task<ActionResult<List<TagPopularityRuleDto>>> GetAll(
     [FromQuery] string? tag,
     CancellationToken ct)
         {
@@ -48,14 +48,14 @@ namespace ShotDeckSearch.Controllers
                 if (string.IsNullOrWhiteSpace(tag))
                 {
                     sql = @"
-SELECT tag
+SELECT id, tag, percentage, is_active, created_at, updated_at
 FROM frl.frl_popularity_tag_rules
 ORDER BY tag;";
                 }
                 else
                 {
                     sql = @"
-SELECT tag
+SELECT id, tag, percentage, is_active, created_at, updated_at
 FROM frl.frl_popularity_tag_rules
 WHERE tag ILIKE @tag
 ORDER BY tag;";
@@ -67,10 +67,10 @@ ORDER BY tag;";
 
                 await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-                var results = new List<string>();
+                var results = new List<TagPopularityRuleDto>();
                 while (await reader.ReadAsync(ct))
                 {
-                    results.Add(reader.GetString(0));
+                    results.Add(MapToDto(reader));
                 }
 
                 return Ok(results);
