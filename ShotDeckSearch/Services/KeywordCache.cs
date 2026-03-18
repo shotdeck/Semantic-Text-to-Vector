@@ -38,6 +38,7 @@ namespace ShotDeck.Keywords
         IReadOnlyCollection<string> GetAllSynonymMasters();
         string? GetSynonymCategory(string keyword);
         IReadOnlyDictionary<string, HashSet<string>> GetKeywordToCategories();
+        IReadOnlyCollection<string> GetImageTags();
     }
     public sealed class CensorshipCheckResult
     {
@@ -126,6 +127,7 @@ namespace ShotDeck.Keywords
         public readonly Dictionary<string, List<string>> MasterToSynonyms;
         public readonly Dictionary<string, HashSet<string>> KeywordToCategories;
         public readonly Dictionary<string, string> NormalizedUnwantedWords;
+        public readonly HashSet<string> ImageTags;
         internal static readonly string FlatFile = "keywords_flat.csv";
         internal static readonly string SourcesFile = "keyword_sources.csv";
         internal static readonly string ByCategoryFile = "keywords_by_category.csv";
@@ -133,8 +135,9 @@ namespace ShotDeck.Keywords
         internal static readonly string UnwantedWordsFile = "unwanted_words.csv";
         internal static readonly string MasterTermsFile = "master_terms.csv";
         internal static readonly string MasterTermCategoriesFile = "master_term_categories.csv";
-        public static readonly KeywordSnapshot Empty = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase), new PhraseMatcher(new HashSet<string>(StringComparer.OrdinalIgnoreCase)), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
-        public KeywordSnapshot(HashSet<string> flat, Dictionary<string, HashSet<string>> sources, Dictionary<string, List<string>> byCategory, PhraseMatcher matcher, Dictionary<string, string> synonymToMaster, Dictionary<string, bool> unwantedWords, HashSet<string> allMasterTerms, Dictionary<string, string> masterTermCategories)
+        internal static readonly string ImageTagsFile = "image_tags.csv";
+        public static readonly KeywordSnapshot Empty = new(new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase), new PhraseMatcher(new HashSet<string>(StringComparer.OrdinalIgnoreCase)), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase), new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase), new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+        public KeywordSnapshot(HashSet<string> flat, Dictionary<string, HashSet<string>> sources, Dictionary<string, List<string>> byCategory, PhraseMatcher matcher, Dictionary<string, string> synonymToMaster, Dictionary<string, bool> unwantedWords, HashSet<string> allMasterTerms, Dictionary<string, string> masterTermCategories, HashSet<string> imageTags)
         {
             FlatSet = flat;
             KeywordSources = sources;
@@ -144,6 +147,7 @@ namespace ShotDeck.Keywords
             UnwantedWords = unwantedWords;
             AllMasterTerms = allMasterTerms;
             MasterTermCategories = masterTermCategories;
+            ImageTags = imageTags;
 
             // Pre-compute MasterToSynonyms inverse map
             var m2s = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
@@ -538,6 +542,11 @@ namespace ShotDeck.Keywords
             EnsureWarmOrCsvThenBackgroundRefresh();
             return _snapshot.KeywordToCategories;
         }
+        public IReadOnlyCollection<string> GetImageTags()
+        {
+            EnsureWarmOrCsvThenBackgroundRefresh();
+            return _snapshot.ImageTags;
+        }
         public CensorshipCheckResult CheckCensorship(string text)
         {
             EnsureWarmOrCsvThenBackgroundRefresh();
@@ -878,6 +887,10 @@ namespace ShotDeck.Keywords
       }) AddKeywordLocal(s, "composition");
             await AddImagesTagsToSet();
             await AddMoviesTagsToSet();
+            // Fetch unique image tags for in-memory lookup
+            var imageTags = await FetchImageTags(conn);
+            foreach (var tag in imageTags) AddKeywordLocal(tag, "image_tag");
+            Console.WriteLine($"[KeywordCache] Image tags loaded: {imageTags.Count}");
             if (_keywordsByCategory.Count > 0) newByCategory = new Dictionary<string,
             List<string>>(_keywordsByCategory, StringComparer.OrdinalIgnoreCase);
             var (synonymToMaster, allMasterTerms) = await FetchSynonymToMasterMapAndMasters(conn);
@@ -912,11 +925,11 @@ namespace ShotDeck.Keywords
             Console.WriteLine($"[KeywordCache] Master term categories loaded: {masterTermCategories.Count}");
             
             var newMatcher = new PhraseMatcher(newSet);
-            var newSnapshot = new KeywordSnapshot(newSet, newSources, newByCategory, newMatcher, synonymToMaster, unwantedWords, allMasterTerms, masterTermCategories);
+            var newSnapshot = new KeywordSnapshot(newSet, newSources, newByCategory, newMatcher, synonymToMaster, unwantedWords, allMasterTerms, masterTermCategories, imageTags);
             SaveSnapshotToCsv(newSnapshot);
             Interlocked.Exchange(ref _snapshot, newSnapshot);
             PublishStatus();
-            Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}, unwanted={_snapshot.UnwantedWords.Count}, masters={_snapshot.AllMasterTerms.Count}, masterCats={_snapshot.MasterTermCategories.Count}");
+            Console.WriteLine($"[KeywordCache] Snapshot swap: flat={_snapshot.FlatSet.Count}, sources={_snapshot.KeywordSources.Count}, cats={_snapshot.KeywordsByCategory.Count}, syn={_snapshot.SynonymToMaster.Count}, unwanted={_snapshot.UnwantedWords.Count}, masters={_snapshot.AllMasterTerms.Count}, masterCats={_snapshot.MasterTermCategories.Count}, imageTags={_snapshot.ImageTags.Count}");
         }
         private static async Task<(Dictionary<string, string> SynonymToMaster, HashSet<string> AllMasterTerms)> FetchSynonymToMasterMapAndMasters(NpgsqlConnection conn)
         {
@@ -971,6 +984,21 @@ namespace ShotDeck.Keywords
             
             return unwantedWords;
         }
+        private static async Task<HashSet<string>> FetchImageTags(NpgsqlConnection conn)
+        {
+            var tags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            const string sql = @"SELECT DISTINCT tag FROM frl_join_images_tags WHERE tag IS NOT NULL;";
+            using var cmd = new NpgsqlCommand(sql, conn);
+            using var reader = await cmd.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                if (reader.IsDBNull(0)) continue;
+                var tag = reader.GetString(0)?.Trim();
+                if (!string.IsNullOrWhiteSpace(tag))
+                    tags.Add(tag);
+            }
+            return tags;
+        }
         private static async Task<Dictionary<string, string>> FetchMasterTermCategories(NpgsqlConnection conn)
         {
             var categories = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1021,9 +1049,13 @@ namespace ShotDeck.Keywords
                 var masterTermCategories = File.Exists(masterTermCategoriesPath)
                     ? LoadMasterTermCategories(masterTermCategoriesPath)
                     : new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                var imageTagsPath = Path.Combine(_csvDir, KeywordSnapshot.ImageTagsFile);
+                var imageTags = File.Exists(imageTagsPath)
+                    ? LoadImageTags(imageTagsPath)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 if (flat.Count == 0) return false;
                 var matcher = new PhraseMatcher(flat);
-                snapshot = new KeywordSnapshot(flat, sources, byCat, matcher, synonyms, unwantedWords, masterTerms, masterTermCategories);
+                snapshot = new KeywordSnapshot(flat, sources, byCat, matcher, synonyms, unwantedWords, masterTerms, masterTermCategories, imageTags);
                 return true;
             }
             catch (Exception ex)
@@ -1124,6 +1156,18 @@ namespace ShotDeck.Keywords
                 var s = line.Trim();
                 if (s.Length == 0) continue;
                 if (s.Equals("master_term", StringComparison.OrdinalIgnoreCase)) continue;
+                set.Add(Uncsv(s));
+            }
+            return set;
+        }
+        private static HashSet<string> LoadImageTags(string path)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var line in File.ReadLines(path, Encoding.UTF8))
+            {
+                var s = line.Trim();
+                if (s.Length == 0) continue;
+                if (s.Equals("tag", StringComparison.OrdinalIgnoreCase)) continue;
                 set.Add(Uncsv(s));
             }
             return set;
@@ -1243,6 +1287,10 @@ namespace ShotDeck.Keywords
                     masterTermCategoriesLines.Add($"{Csv(kv.Key)},{Csv(kv.Value)}");
                 }
                 File.WriteAllLines(Path.Combine(_csvDir, KeywordSnapshot.MasterTermCategoriesFile), masterTermCategoriesLines, Encoding.UTF8);
+                
+                var imageTagsLines = new List<string>(snap.ImageTags.Count + 1) { "tag" };
+                imageTagsLines.AddRange(snap.ImageTags.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).Select(Csv));
+                File.WriteAllLines(Path.Combine(_csvDir, KeywordSnapshot.ImageTagsFile), imageTagsLines, Encoding.UTF8);
                 
                 Console.WriteLine($"[KeywordCacheService] Snapshot CSVs written to {_csvDir}");
             }
