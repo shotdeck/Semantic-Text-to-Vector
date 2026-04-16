@@ -20,7 +20,7 @@ builder.Services.AddApplicationInsightsTelemetry(options =>
 // SSH tunnel (optional, you had this)
 builder.Services.AddHostedService<SshTunnelService>();
 
-// Database connection (scoped, lazy – only opened when first accessed)
+// Database connection (scoped, lazy – only opened when first accesdsed)
 builder.Services.AddScoped<Lazy<NpgsqlConnection>>(sp =>
 {
     return new Lazy<NpgsqlConnection>(() =>
