@@ -42,7 +42,7 @@ public class SshTunnelService : IHostedService, IDisposable
 
     private async Task RunLoopAsync(CancellationToken ct)
     {
-        // Your constants (keep these exactly as you had them)
+        // Your constants
         string sshHost = "35.89.51.60";
         int sshPort = 22;
         string sshUser = "ec2-user";
