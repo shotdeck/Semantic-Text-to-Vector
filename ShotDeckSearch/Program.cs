@@ -22,21 +22,39 @@ builder.Services.AddApplicationInsightsTelemetry(options =>
 // SSH tunnel (optional, you had this)
 builder.Services.AddHostedService<SshTunnelService>();
 
-// Database connection (scoped). IMPORTANT: do NOT call Open() here.
-// Opening during DI resolution means that any failure (e.g. dead SSH tunnel,
-// stale pooled socket) becomes a blank 500 that is thrown before any
-// controller/middleware runs, making it impossible to return a useful error
-// body or catch the failure with IExceptionHandler. Callers open the
-// connection lazily (every controller already does this via the `mustClose`
-// pattern: `if (_connection.State != ConnectionState.Open) await _connection.OpenAsync(...)`).
-builder.Services.AddScoped<NpgsqlConnection>(sp =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    var connStr = config.GetConnectionString("DefaultConnection")
+static string ResolveConnectionString(IConfiguration config) =>
+    config.GetConnectionString("DefaultConnection")
         ?? config["ConnectionStrings:Default"]
         ?? throw new InvalidOperationException("DefaultConnection is not configured.");
 
-    return new NpgsqlConnection(connStr);
+// Lazy<NpgsqlConnection>: opens on first `.Value` access, NOT during DI
+// resolution. SearchController + KeywordCache use this so they keep the
+// "already open" fast path without having to call OpenAsync themselves.
+// Because Open() happens lazily (inside the action / service method), any
+// failure now surfaces through our UseExceptionHandler middleware instead of
+// being thrown during controller activation as a blank 500.
+builder.Services.AddScoped<Lazy<NpgsqlConnection>>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    return new Lazy<NpgsqlConnection>(() =>
+    {
+        var conn = new NpgsqlConnection(ResolveConnectionString(config));
+        conn.Open();
+        return conn;
+    });
+});
+
+// Plain NpgsqlConnection: returns a CLOSED connection. Admin controllers
+// (SynonymsAdminController, UnwantedWordsController) already open it
+// themselves via the `mustClose` pattern with OpenAsync(CancellationToken),
+// which is what we want — failures surface cleanly and are cancellable.
+// IMPORTANT: do NOT forward this to Lazy<NpgsqlConnection>.Value — that
+// would re-introduce the eager-Open-during-DI-resolution bug that produced
+// blank 500s when the SSH tunnel or pool was unhealthy.
+builder.Services.AddScoped<NpgsqlConnection>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    return new NpgsqlConnection(ResolveConnectionString(config));
 });
 
 // Keyword caching (singleton) - also includes unwanted words caching
