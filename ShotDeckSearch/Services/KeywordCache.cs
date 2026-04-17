@@ -808,6 +808,12 @@ namespace ShotDeck.Keywords
             using
             var scope = _serviceProvider.CreateScope();
             var conn = scope.ServiceProvider.GetRequiredService<NpgsqlConnection>();
+            // NpgsqlConnection is now registered as a CLOSED connection in
+            // Program.cs (see comment there). Open it explicitly here — the
+            // old code relied on the DI factory opening it during resolution,
+            // which we removed to stop blank 500s during controller activation.
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync().ConfigureAwait(false);
             var newSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var newSources = new Dictionary<string,
             HashSet<string>>(StringComparer.OrdinalIgnoreCase);
