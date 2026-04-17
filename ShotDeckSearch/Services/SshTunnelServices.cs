@@ -1,4 +1,5 @@
-﻿using Renci.SshNet;
+﻿using Npgsql;
+using Renci.SshNet;
 using ConnectionInfo = Renci.SshNet.ConnectionInfo;
 
 public class SshTunnelService : IHostedService, IDisposable
@@ -112,6 +113,23 @@ public class SshTunnelService : IHostedService, IDisposable
                 }
 
                 Console.WriteLine("⚠️ Tunnel no longer active; will reconnect…");
+
+                // The local forward port (127.0.0.1:5433) has just died.
+                // Npgsql keeps TCP connections in a pool keyed by the connection
+                // string. Those pooled sockets still point at the now-dead
+                // forward, so the next `conn.Open()` hands out a broken
+                // connection and every query 500s until the app is restarted.
+                // Evict all pooled connections so the next Open() dials a
+                // fresh socket through the new forward.
+                try
+                {
+                    NpgsqlConnection.ClearAllPools();
+                    Console.WriteLine("🧹 Cleared Npgsql connection pools after tunnel drop.");
+                }
+                catch (Exception poolEx)
+                {
+                    Console.WriteLine("⚠️ Failed to clear Npgsql pools: " + poolEx.Message);
+                }
             }
             catch (OperationCanceledException)
             {
