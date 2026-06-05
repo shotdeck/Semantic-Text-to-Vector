@@ -733,6 +733,7 @@ namespace ShotDeck.Keywords
             using
             var scope = _serviceProvider.CreateScope();
             var conn = scope.ServiceProvider.GetRequiredService<NpgsqlConnection>();
+            await conn.OpenAsync();
             var newSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var newSources = new Dictionary<string,
             HashSet<string>>(StringComparer.OrdinalIgnoreCase);

@@ -19,16 +19,17 @@ builder.Services.AddApplicationInsightsTelemetry(options =>
 // SSH tunnel (optional, you had this)
 builder.Services.AddHostedService<SshTunnelService>();
 
-// Database connection (scoped)
+// Database connection (scoped – NOT eagerly opened so controllers can
+// open / close per-method via the existing mustClose pattern, returning
+// connections to the pool immediately instead of holding them for the
+// entire request lifetime).
 builder.Services.AddScoped<NpgsqlConnection>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
     var connStr = config.GetConnectionString("DefaultConnection")
         ?? throw new InvalidOperationException("DefaultConnection is not configured.");
 
-    var conn = new NpgsqlConnection(connStr);
-    conn.Open(); // connection is opened per scope
-    return conn;
+    return new NpgsqlConnection(connStr);
 });
 
 // Keyword caching (singleton) - also includes unwanted words caching

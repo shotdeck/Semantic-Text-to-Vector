@@ -147,59 +147,73 @@ namespace ShotDeckSearch.Controllers
 
             var results = new List<object>();
 
-            foreach (var rawTerm in terms)
+            var mustClose = false;
+            if (_connection.State != ConnectionState.Open)
             {
-                var term = rawTerm?.Trim();
-                if (string.IsNullOrWhiteSpace(term))
-                    continue;
+                await _connection.OpenAsync();
+                mustClose = true;
+            }
 
-                string? matchedKeyword = null;
-
-                // 1) Exact match in flat keyword list
-                matchedKeyword = flat.FirstOrDefault(k =>
-                    k.Equals(term, StringComparison.OrdinalIgnoreCase));
-
-                // 2) PhraseMatcher search if not found
-                if (matchedKeyword == null)
+            try
+            {
+                foreach (var rawTerm in terms)
                 {
-                    var hits = _keywordCache.Search(term);
-                    if (hits.Count > 0)
-                        matchedKeyword = hits.OrderByDescending(h => h.Length).First();
-                }
+                    var term = rawTerm?.Trim();
+                    if (string.IsNullOrWhiteSpace(term))
+                        continue;
 
-                // 3) If still not found, fallback to DB search in frl_join_images_tags
-                bool foundInTags = false;
-                if (matchedKeyword == null)
-                {
-                    var sql = @"SELECT tag FROM frl_join_images_tags WHERE tag ILIKE @tag LIMIT 1;";
-                    using var cmd = new NpgsqlCommand(sql, _connection);
-                    cmd.Parameters.AddWithValue("tag", term);
+                    string? matchedKeyword = null;
 
-                    var db = await cmd.ExecuteScalarAsync();
-                    if (db != null)
+                    // 1) Exact match in flat keyword list
+                    matchedKeyword = flat.FirstOrDefault(k =>
+                        k.Equals(term, StringComparison.OrdinalIgnoreCase));
+
+                    // 2) PhraseMatcher search if not found
+                    if (matchedKeyword == null)
                     {
-                        matchedKeyword = db.ToString();
-                        foundInTags = true;
+                        var hits = _keywordCache.Search(term);
+                        if (hits.Count > 0)
+                            matchedKeyword = hits.OrderByDescending(h => h.Length).First();
                     }
+
+                    // 3) If still not found, fallback to DB search in frl_join_images_tags
+                    bool foundInTags = false;
+                    if (matchedKeyword == null)
+                    {
+                        var sql = @"SELECT tag FROM frl_join_images_tags WHERE tag ILIKE @tag LIMIT 1;";
+                        await using var cmd = new NpgsqlCommand(sql, _connection);
+                        cmd.Parameters.AddWithValue("tag", term);
+
+                        var db = await cmd.ExecuteScalarAsync();
+                        if (db != null)
+                        {
+                            matchedKeyword = db.ToString();
+                            foundInTags = true;
+                        }
+                    }
+
+                    // 4) Build category list
+                    List<string> categories =
+                        matchedKeyword != null && kwToCats.TryGetValue(matchedKeyword, out var set2)
+                            ? set2.OrderBy(x => x).ToList()
+                            : new List<string>();
+
+                    if (foundInTags)
+                        categories.Add("Image Tag");
+
+                    results.Add(new
+                    {
+                        term,
+                        keyword = matchedKeyword,
+                        categories,
+                        found = matchedKeyword != null,
+                        source = foundInTags ? "frl_join_images_tags" : "keyword_cache"
+                    });
                 }
-
-                // 4) Build category list
-                List<string> categories =
-                    matchedKeyword != null && kwToCats.TryGetValue(matchedKeyword, out var set2)
-                        ? set2.OrderBy(x => x).ToList()
-                        : new List<string>();
-
-                if (foundInTags)
-                    categories.Add("Image Tag");
-
-                results.Add(new
-                {
-                    term,
-                    keyword = matchedKeyword,
-                    categories,
-                    found = matchedKeyword != null,
-                    source = foundInTags ? "frl_join_images_tags" : "keyword_cache"
-                });
+            }
+            finally
+            {
+                if (mustClose) await _connection.CloseAsync();
             }
 
             return Ok(new { results });
