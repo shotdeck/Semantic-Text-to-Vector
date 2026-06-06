@@ -27,30 +27,11 @@ static string ResolveConnectionString(IConfiguration config) =>
         ?? config["ConnectionStrings:Default"]
         ?? throw new InvalidOperationException("DefaultConnection is not configured.");
 
-// Lazy<NpgsqlConnection>: opens on first `.Value` access, NOT during DI
-// resolution. SearchController + KeywordCache use this so they keep the
-// "already open" fast path without having to call OpenAsync themselves.
-// Because Open() happens lazily (inside the action / service method), any
-// failure now surfaces through our UseExceptionHandler middleware instead of
-// being thrown during controller activation as a blank 500.
-builder.Services.AddScoped<Lazy<NpgsqlConnection>>(sp =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    return new Lazy<NpgsqlConnection>(() =>
-    {
-        var conn = new NpgsqlConnection(ResolveConnectionString(config));
-        conn.Open();
-        return conn;
-    });
-});
-
-// Plain NpgsqlConnection: returns a CLOSED connection. Admin controllers
-// (SynonymsAdminController, UnwantedWordsController) already open it
-// themselves via the `mustClose` pattern with OpenAsync(CancellationToken),
-// which is what we want — failures surface cleanly and are cancellable.
-// IMPORTANT: do NOT forward this to Lazy<NpgsqlConnection>.Value — that
-// would re-introduce the eager-Open-during-DI-resolution bug that produced
-// blank 500s when the SSH tunnel or pool was unhealthy.
+// Database connection (scoped, CLOSED). All controllers open the connection
+// themselves via the mustClose pattern (OpenAsync → use → CloseAsync in
+// finally), returning it to the pool immediately after each operation.
+// Do NOT open the connection here — that holds a pool slot for the entire
+// request lifetime and caused pool-exhaustion 500s under load.
 builder.Services.AddScoped<NpgsqlConnection>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();

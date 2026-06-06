@@ -15,18 +15,16 @@ namespace ShotDeckSearch.Controllers
     [Route("api/admin/unwanted-words")]
     public sealed class UnwantedWordsAdminController : ControllerBase
     {
-        private readonly Lazy<NpgsqlConnection> _lazyConnection;
+        private readonly NpgsqlConnection _connection;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<UnwantedWordsAdminController> _logger;
 
-        private NpgsqlConnection _connection => _lazyConnection.Value;
-
         public UnwantedWordsAdminController(
-            Lazy<NpgsqlConnection> lazyConnection,
+            NpgsqlConnection connection,
             IServiceScopeFactory scopeFactory,
             ILogger<UnwantedWordsAdminController> logger)
         {
-            _lazyConnection = lazyConnection;
+            _connection = connection;
             _scopeFactory = scopeFactory;
             _logger = logger;
         }

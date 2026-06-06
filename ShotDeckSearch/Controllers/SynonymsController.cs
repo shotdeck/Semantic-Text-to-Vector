@@ -15,18 +15,16 @@ namespace ShotDeckSearch.Controllers
     [Route("api/admin/synonyms")]
     public sealed class SynonymsAdminController : ControllerBase
     {
-        private readonly Lazy<NpgsqlConnection> _lazyConnection;
+        private readonly NpgsqlConnection _connection;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<SynonymsAdminController> _logger;
 
-        private NpgsqlConnection _connection => _lazyConnection.Value;
-
         public SynonymsAdminController(
-            Lazy<NpgsqlConnection> lazyConnection,
+            NpgsqlConnection connection,
             IServiceScopeFactory scopeFactory,
             ILogger<SynonymsAdminController> logger)
         {
-            _lazyConnection = lazyConnection;
+            _connection = connection;
             _scopeFactory = scopeFactory;
             _logger = logger;
         }
