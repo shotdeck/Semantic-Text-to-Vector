@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
+using ShotDeck.Keywords;
 using System.Data;
 using System.Globalization;
 
@@ -18,15 +19,27 @@ namespace ShotDeckSearch.Controllers
         private readonly NpgsqlConnection _connection;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<UnwantedWordsAdminController> _logger;
+        private readonly IKeywordCacheService _keywordCache;
 
         public UnwantedWordsAdminController(
             NpgsqlConnection connection,
             IServiceScopeFactory scopeFactory,
-            ILogger<UnwantedWordsAdminController> logger)
+            ILogger<UnwantedWordsAdminController> logger,
+            IKeywordCacheService keywordCache)
         {
             _connection = connection;
             _scopeFactory = scopeFactory;
             _logger = logger;
+            _keywordCache = keywordCache;
+        }
+
+        private void RefreshCacheInBackground()
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await _keywordCache.RefreshAsync(); }
+                catch (Exception ex) { _logger.LogError(ex, "Background cache refresh after admin mutation failed."); }
+            });
         }
 
         [HttpGet("test")]
@@ -162,6 +175,7 @@ RETURNING id, phrase, is_super_blacklist;";
                     IsSuperBlacklist = !reader.IsDBNull(2) && reader.GetBoolean(2)
                 };
 
+                RefreshCacheInBackground();
                 return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -213,6 +227,7 @@ RETURNING id, phrase, is_super_blacklist;";
                 if (!await reader.ReadAsync(ct))
                     return NotFound(new { Message = $"Unwanted word with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return Ok(new UnwantedWordDto
                 {
                     Id = reader.GetInt32(0),
@@ -257,6 +272,7 @@ RETURNING id, phrase, is_super_blacklist;";
                 if (rowsAffected == 0)
                     return NotFound(new { Message = $"Unwanted word with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return NoContent();
             }
             finally
@@ -420,6 +436,7 @@ RETURNING id;";
                 }
 
                 await tx.CommitAsync(ct);
+                RefreshCacheInBackground();
                 return Ok(result);
             }
             catch (Exception ex)
