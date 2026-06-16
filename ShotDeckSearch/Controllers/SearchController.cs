@@ -1268,6 +1268,7 @@ namespace ShotDeckSearch.Controllers
                 "actors" => "Actors",
                 "int_ext" => "Interior/Exterior",
                 "aspect_ratio" => "Aspect Ratio",
+                "lens" => "Lens",
                 _ when s.StartsWith("movie:") => MapSourceToCategory(s.Substring("movie:".Length)),
                 _ when s.StartsWith("image:") => MapSourceToCategory(s.Substring("image:".Length)),
                 "title" => "Title",

@@ -1336,7 +1336,7 @@ namespace ShotDeck.Keywords
         private static async Task<List<(string Value, string Field)>> FetchImageFieldsByColumn(NpgsqlConnection conn)
         {
             var result = new List<(string Value, string Field)>();
-            const string sql = @"SELECT actors, int_ext, aspect_ratio FROM frl_images;";
+            const string sql = @"SELECT actors, int_ext, aspect_ratio, lens FROM frl_images;";
             using
             var cmd = new NpgsqlCommand(sql, conn);
             using
@@ -1344,7 +1344,8 @@ namespace ShotDeck.Keywords
             string[] fieldNames = {
         "actors",
         "int_ext",
-        "aspect_ratio"
+        "aspect_ratio",
+        "lens"
       };
             var seenByField = new Dictionary<string,
             HashSet<string>>(StringComparer.OrdinalIgnoreCase);
