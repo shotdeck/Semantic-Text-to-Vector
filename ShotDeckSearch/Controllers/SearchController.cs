@@ -1262,7 +1262,7 @@ namespace ShotDeckSearch.Controllers
                 "lighting" => "Lighting",
                 "time_of_day" => "Time of Day",
                 "vfx_backing" => "VFX Backing",
-                "color" => "Color",
+               // "color" => "Color",
                 "lens size" => "Lens Size",
                 "composition" => "Composition",
                 "actors" => "Actors",

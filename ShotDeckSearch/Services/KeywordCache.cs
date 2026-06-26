@@ -865,7 +865,7 @@ namespace ShotDeck.Keywords
             await AddTagsToSet("frl_join_images_lighting_type", "lighting_type", "lighting_type");
 
             await AddTagsToSet("frl_join_images_vfx_backing", "vfx_backing", "vfx_backing");
-            await AddTagsToSet("frl_join_images_color", "color", "color");
+            //await AddTagsToSet("frl_join_images_color", "color", "color");
             await AddTagsToSet("frl_join_images_shot_type", "shot_type", "shot_type");
             await AddTagsToSet("frl_join_images_lighting", "lighting", "lighting");
             foreach (var s in new[] {
