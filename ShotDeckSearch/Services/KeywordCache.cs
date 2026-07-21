@@ -864,22 +864,12 @@ namespace ShotDeck.Keywords
             await AddTagsToSet("frl_join_images_time_of_day", "time_of_day", "time_of_day");
             await AddTagsToSet("frl_join_images_lighting_type", "lighting_type", "lighting_type");
 
-            await AddTagsToSet("frl_join_images_vfx_backing", "vfx_backing", "vfx_backing");
             //await AddTagsToSet("frl_join_images_color", "color", "color");
             await AddTagsToSet("frl_join_images_shot_type", "shot_type", "shot_type");
             await AddTagsToSet("frl_join_images_lighting", "lighting", "lighting");
             foreach (var s in new[] {
-        "Ultra Wide / Fisheye",
-        "Wide",
-        "Medium",
-        "Long Lens",
-        "Telephoto"
-      }) AddKeywordLocal(s, "lens size");
-            foreach (var s in new[] {
-        "Center",
         "Left heavy",
         "Right heavy",
-        "Balanced",
         "Symmetrical",
         "Short side"
       }) AddKeywordLocal(s, "composition");
@@ -1306,20 +1296,18 @@ namespace ShotDeck.Keywords
         private static async Task<List<(string Value, string Field)>> FetchMovieFieldsByColumn(NpgsqlConnection conn)
         {
             var result = new List<(string, string)>();
-            const string sql = @" SELECT media_type, title, director, cinematographer, production_designer, costume_designer, mv_artist, comm_brand FROM frl_movies WHERE title IS NULL OR title <> 'The Movie';";
+            const string sql = @" SELECT title, director, cinematographer, production_designer, costume_designer, mv_artist FROM frl_movies WHERE title IS NULL OR title <> 'The Movie';";
             using
             var cmd = new NpgsqlCommand(sql, conn);
             using
             var reader = await cmd.ExecuteReaderAsync();
             string[] fieldNames = {
-        "media_type",
         "title",
         "director",
         "cinematographer",
         "production_designer",
         "costume_designer",
-        "mv_artist",
-        "comm_brand"
+        "mv_artist"
       };
             while (await reader.ReadAsync())
             {
