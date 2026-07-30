@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using NpgsqlTypes;
+using ShotDeck.Keywords;
 using System.Data;
 using System.Globalization;
 
@@ -18,15 +19,27 @@ namespace ShotDeckSearch.Controllers
         private readonly NpgsqlConnection _connection;
         private readonly IServiceScopeFactory _scopeFactory;
         private readonly ILogger<SynonymsAdminController> _logger;
+        private readonly IKeywordCacheService _keywordCache;
 
         public SynonymsAdminController(
             NpgsqlConnection connection,
             IServiceScopeFactory scopeFactory,
-            ILogger<SynonymsAdminController> logger)
+            ILogger<SynonymsAdminController> logger,
+            IKeywordCacheService keywordCache)
         {
             _connection = connection;
             _scopeFactory = scopeFactory;
             _logger = logger;
+            _keywordCache = keywordCache;
+        }
+
+        private void RefreshCacheInBackground()
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await _keywordCache.RefreshAsync(); }
+                catch (Exception ex) { _logger.LogError(ex, "Background cache refresh after admin mutation failed."); }
+            });
         }
 
         #region Master Terms CRUD
@@ -173,6 +186,7 @@ LEFT JOIN frl.frl_keywords_synonyms_category c ON i.category_id = c.id;";
                     CategoryName = reader.IsDBNull(4) ? null : reader.GetString(4)
                 };
 
+                RefreshCacheInBackground();
                 return CreatedAtAction(nameof(GetMasterById), new { id = result.Id }, result);
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -230,6 +244,7 @@ LEFT JOIN frl.frl_keywords_synonyms_category c ON u.category_id = c.id;";
                 if (!await reader.ReadAsync(ct))
                     return NotFound(new { Message = $"Master term with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return Ok(new MasterTermDto
                 {
                     Id = reader.GetInt32(0),
@@ -276,6 +291,7 @@ LEFT JOIN frl.frl_keywords_synonyms_category c ON u.category_id = c.id;";
                 if (rowsAffected == 0)
                     return NotFound(new { Message = $"Master term with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return NoContent();
             }
             finally
@@ -406,6 +422,7 @@ RETURNING id, category_name;";
                     CategoryName = reader.GetString(1)
                 };
 
+                RefreshCacheInBackground();
                 return CreatedAtAction(nameof(GetCategoryById), new { id = result.Id }, result);
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -456,6 +473,7 @@ RETURNING id, category_name;";
                 if (!await reader.ReadAsync(ct))
                     return NotFound(new { Message = $"Category with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return Ok(new CategoryDto
                 {
                     Id = reader.GetInt32(0),
@@ -499,6 +517,7 @@ RETURNING id, category_name;";
                 if (rowsAffected == 0)
                     return NotFound(new { Message = $"Category with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return NoContent();
             }
             finally
@@ -658,6 +677,7 @@ RETURNING id, master_id, synonym_term, is_included;";
                     IsIncluded = !reader.IsDBNull(3) && reader.GetBoolean(3)
                 };
 
+                RefreshCacheInBackground();
                 return CreatedAtAction(nameof(GetSynonymById), new { id = result.Id }, result);
             }
             catch (PostgresException ex) when (ex.SqlState == "23505")
@@ -709,6 +729,7 @@ RETURNING id, master_id, synonym_term, is_included;";
                 if (!await reader.ReadAsync(ct))
                     return NotFound(new { Message = $"Synonym with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return Ok(new SynonymDto
                 {
                     Id = reader.GetInt32(0),
@@ -754,6 +775,7 @@ RETURNING id, master_id, synonym_term, is_included;";
                 if (rowsAffected == 0)
                     return NotFound(new { Message = $"Synonym with ID {id} not found." });
 
+                RefreshCacheInBackground();
                 return NoContent();
             }
             finally
@@ -1001,6 +1023,7 @@ ON CONFLICT (master_id, synonym_term) DO NOTHING;";
                 }
 
                 await tx.CommitAsync(ct);
+                RefreshCacheInBackground();
                 return Ok(result);
             }
             catch (Exception ex)
