@@ -12,15 +12,6 @@ variables:
   solution: '**/*.sln'
   buildPlatform: 'Any CPU'
   buildConfiguration: 'Release'
-  # --- Deployment (set these as pipeline variables in Azure DevOps) ---
-  # azureServiceConnection: name of the ARM service connection. The Deploy
-  #   stage is skipped while this is empty, so the existing release pipeline
-  #   that consumes the "drop" artifact keeps working unchanged.
-  # webAppName / resourceGroup: from Properties/PublishProfiles/*.pubxml
-  # slotName: the deployment slot to warm before swapping into production
-  webAppName: 'shotdecksearch'
-  resourceGroup: 'ShotdeckSearch'
-  slotName: 'staging'
 
 stages:
 - stage: Build
@@ -51,59 +42,17 @@ stages:
         platform: '$(buildPlatform)'
         configuration: '$(buildConfiguration)'
 
+    # The classic release runs deploy/Warm-Slot-And-Swap.ps1 from the drop
+    # artifact to warm the staging slot before swapping it into production.
+    - task: CopyFiles@2
+      displayName: 'Copy deploy scripts into the artifact'
+      inputs:
+        SourceFolder: 'deploy'
+        Contents: '*.ps1'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)/deploy'
+
     - task: PublishBuildArtifacts@1
       inputs:
         PathtoPublish: '$(Build.ArtifactStagingDirectory)'
         ArtifactName: 'drop'
         publishLocation: 'Container'
-
-# Deploy to the slot, load the keyword cache from the database there, and only
-# then swap it into production. Production keeps serving its warm cache the
-# whole time; the slot's SshTunnelService picks a free loopback port
-# (TunnelPortSelector) so it never fights production for 127.0.0.1:5433.
-- stage: Deploy
-  dependsOn: Build
-  condition: and(succeeded(), ne(variables['azureServiceConnection'], ''))
-  jobs:
-  - deployment: WarmSlotAndSwap
-    environment: 'production'
-    strategy:
-      runOnce:
-        deploy:
-          steps:
-          - checkout: self
-          - download: current
-            artifact: drop
-
-          - task: AzureAppServiceManage@0
-            displayName: 'Start $(slotName) slot'
-            inputs:
-              azureSubscription: '$(azureServiceConnection)'
-              Action: 'Start Azure App Service'
-              WebAppName: '$(webAppName)'
-              SpecifySlotOrASE: true
-              ResourceGroupName: '$(resourceGroup)'
-              Slot: '$(slotName)'
-
-          - task: AzureWebApp@1
-            displayName: 'Deploy to $(slotName) slot'
-            inputs:
-              azureSubscription: '$(azureServiceConnection)'
-              appType: 'webApp'
-              appName: '$(webAppName)'
-              resourceGroupName: '$(resourceGroup)'
-              deployToSlotOrASE: true
-              slotName: '$(slotName)'
-              package: '$(Pipeline.Workspace)/drop/**/*.zip'
-
-          - task: AzureCLI@2
-            displayName: 'Warm keyword cache on $(slotName), then swap to production'
-            inputs:
-              azureSubscription: '$(azureServiceConnection)'
-              scriptType: 'pscore'
-              scriptLocation: 'scriptPath'
-              scriptPath: '$(Build.SourcesDirectory)/deploy/Warm-Slot-And-Swap.ps1'
-              arguments: >
-                -ResourceGroup "$(resourceGroup)"
-                -WebAppName "$(webAppName)"
-                -SlotName "$(slotName)"
