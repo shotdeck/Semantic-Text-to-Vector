@@ -5,7 +5,10 @@
 
 .DESCRIPTION
     Run after the new build has been deployed to the slot. Steps:
-      0. Start the slot if it is stopped.
+      0. Start the slot if it is stopped, then copy production's app settings
+         and connection strings onto it (skipped with -SkipSettingsSync), so
+         settings only ever need adding to production. Sticky ("deployment
+         slot setting") entries are left alone on both slots.
       1. Wait for the slot to answer GET /api/pipelinetest/health.
       2. Wait for GET /api/health/db to report the SSH tunnel + Postgres reachable.
       3. POST /api/search/refresh?wait=false, then poll GET /api/search/status
@@ -30,13 +33,61 @@ param(
     [int] $RefreshTimeoutSec = 1800,
     [int] $PollIntervalSec = 10,
     [int] $MinFlatCount = 1000,
-    [switch] $NoSwap
+    [switch] $NoSwap,
+    [switch] $SkipSettingsSync
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (-not $SlotBaseUrl) { $SlotBaseUrl = "https://$WebAppName-$SlotName.azurewebsites.net" }
 $SlotBaseUrl = $SlotBaseUrl.TrimEnd('/')
+
+function Invoke-AzJson {
+    param([string[]] $AzArgs)
+    $out = az @AzArgs -o json
+    if ($LASTEXITCODE -ne 0) { throw "az $($AzArgs[0..3] -join ' ') failed (exit $LASTEXITCODE)." }
+    # ForEach-Object unrolls the array on both Windows PowerShell and pwsh.
+    @($out | Out-String | ConvertFrom-Json | ForEach-Object { $_ })
+}
+
+# Makes the slot's non-sticky entries of one kind ('appsettings' or
+# 'connection-string') match production's. Values are passed via a temp file so
+# they never appear on a command line or in the log.
+function Sync-SlotEntries {
+    param([string] $Kind)
+    $listArgs = @('webapp', 'config', $Kind, 'list', '--resource-group', $ResourceGroup, '--name', $WebAppName)
+    $prod = Invoke-AzJson $listArgs | Where-Object { -not $_.slotSetting }
+    $slot = Invoke-AzJson ($listArgs + @('--slot', $SlotName))
+
+    if ($Kind -eq 'appsettings' -and @($prod).Count -eq 0) {
+        throw "Production returned no app settings; refusing to sync (it would empty the slot)."
+    }
+
+    $prodNames = @($prod | ForEach-Object name)
+    $stale = @($slot | Where-Object { -not $_.slotSetting -and $prodNames -notcontains $_.name } | ForEach-Object name)
+
+    if (@($prod).Count -gt 0) {
+        # Always a JSON array: az reads a single object as a map of setting names.
+        [object[]] $entries = @($prod | ForEach-Object {
+            if ($Kind -eq 'appsettings') { [ordered]@{ name = $_.name; value = $_.value } }
+            else { [ordered]@{ name = $_.name; value = $_.value; type = $_.type } }
+        })
+        $file = New-TemporaryFile
+        try {
+            [IO.File]::WriteAllText($file.FullName, (ConvertTo-Json -InputObject $entries -Depth 5))
+            az webapp config $Kind set --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --settings "@$($file.FullName)" -o none
+            if ($LASTEXITCODE -ne 0) { throw "Copying $Kind to slot '$SlotName' failed (exit $LASTEXITCODE)." }
+        }
+        finally { Remove-Item -Path $file.FullName -Force -ErrorAction SilentlyContinue }
+    }
+
+    if ($stale.Count -gt 0) {
+        az webapp config $Kind delete --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --setting-names @stale -o none
+        if ($LASTEXITCODE -ne 0) { throw "Removing stale $Kind from slot '$SlotName' failed (exit $LASTEXITCODE)." }
+    }
+
+    Write-Host "    ${Kind}: copied $(@($prod).Count) from production, removed $($stale.Count) not on production$(if ($stale.Count) { ': ' + ($stale -join ', ') })"
+}
 
 function Wait-Until {
     param([string] $What, [int] $TimeoutSec, [scriptblock] $Probe)
@@ -62,6 +113,14 @@ if ($state -ne 'Running') {
     Write-Host "Slot '$SlotName' is $state; starting it..."
     az webapp start --resource-group $ResourceGroup --name $WebAppName --slot $SlotName
     if ($LASTEXITCODE -ne 0) { throw "Could not start slot '$SlotName' (exit $LASTEXITCODE)." }
+}
+
+if ($SkipSettingsSync) {
+    Write-Host "-SkipSettingsSync set; leaving the slot's settings as they are."
+} else {
+    Write-Host "Copying production settings to slot '$SlotName' (restarts the slot)..."
+    Sync-SlotEntries 'appsettings'
+    Sync-SlotEntries 'connection-string'
 }
 
 Write-Host "1/4 Waiting for slot to come up..."
