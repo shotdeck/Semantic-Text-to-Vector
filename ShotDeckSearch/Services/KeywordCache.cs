@@ -119,12 +119,26 @@ namespace ShotDeck.Keywords
             init;
         }
 
+        /// <summary>When the CSV snapshot this process loaded was written by a database refresh.</summary>
+        public DateTimeOffset? CsvSnapshotWrittenAt
+        {
+            get;
+            init;
+        }
+
         /// <summary>
-        /// True once this process has completed a database refresh with at least
-        /// <paramref name="minFlatCount"/> keywords. A CSV-only warm doesn't count.
+        /// True if the CSV snapshot was at most <paramref name="maxAge"/> old when loaded,
+        /// e.g. the one staging wrote just before a swap, so it matches the database.
         /// </summary>
-        public bool IsReady(int minFlatCount) =>
-            LastSuccessfulRefreshAt is not null && FlatCount >= minFlatCount;
+        public bool LoadedFreshCsv(TimeSpan maxAge) =>
+            LastCsvWarmAt is not null && CsvSnapshotWrittenAt is not null && LastCsvWarmAt - CsvSnapshotWrittenAt <= maxAge;
+
+        /// <summary>
+        /// True once the cache holds at least <paramref name="minFlatCount"/> keywords from
+        /// a database refresh in this process or from a fresh CSV snapshot.
+        /// </summary>
+        public bool IsReady(int minFlatCount, TimeSpan freshCsvMaxAge) =>
+            FlatCount >= minFlatCount && (LastSuccessfulRefreshAt is not null || LoadedFreshCsv(freshCsvMaxAge));
     }
     internal sealed class KeywordSnapshot
     {
@@ -229,6 +243,7 @@ namespace ShotDeck.Keywords
         private Dictionary<string,
         List<string>> _keywordsByCategory = new(StringComparer.OrdinalIgnoreCase);
         private DateTimeOffset? _lastCsvWarmAt;
+        private DateTimeOffset? _csvSnapshotWrittenAt;
         private readonly object _csvWarmLock = new();
         private DateTimeOffset? _lastRefreshStartAt;
         private DateTimeOffset? _lastRefreshEndAt;
@@ -732,6 +747,7 @@ namespace ShotDeck.Keywords
             return new KeywordCacheStatus
             {
                 LastCsvWarmAt = _lastCsvWarmAt,
+                CsvSnapshotWrittenAt = _csvSnapshotWrittenAt,
                 LastRefreshStartAt = _lastRefreshStartAt,
                 LastRefreshEndAt = _lastRefreshEndAt,
                 IsRefreshRunning = (_refreshGate.CurrentCount == 0),
@@ -762,6 +778,7 @@ namespace ShotDeck.Keywords
                 var warmed))
                 {
                     Interlocked.Exchange(ref _snapshot, warmed);
+                    _csvSnapshotWrittenAt = new DateTimeOffset(File.GetLastWriteTimeUtc(Path.Combine(_csvDir, KeywordSnapshot.FlatFile)), TimeSpan.Zero);
                     _lastCsvWarmAt = DateTimeOffset.UtcNow;
                     PublishStatus();
                     Console.WriteLine($"[KeywordCacheService] CSV re-warm complete. Flat={warmed.FlatSet.Count}, Syn={warmed.SynonymToMaster.Count}");

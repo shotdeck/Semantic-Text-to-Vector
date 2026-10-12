@@ -24,9 +24,8 @@ namespace ShotDeckSearch.Controllers
         }
 
         /// <summary>
-        /// 200 once the keyword cache has loaded from the database, 503 until then.
-        /// Azure's slot swap polls this (WEBSITE_SWAP_WARMUP_PING_PATH) so a
-        /// restarted process never takes production traffic on the CSV snapshot.
+        /// 200 once the keyword cache has loaded from the database or from a fresh
+        /// CSV snapshot, 503 until then. The release polls this before and after the swap.
         /// </summary>
         [HttpGet("ready")]
         public IActionResult GetReadiness()
@@ -35,7 +34,8 @@ namespace ShotDeckSearch.Controllers
             _keywordCache.GetFlatKeywordSet();
             var status = _keywordCache.GetKeywordCacheStatus();
             var minFlatCount = _configuration.GetValue("Readiness:MinFlatCount", 1000);
-            var ready = status.IsReady(minFlatCount);
+            var freshCsvMaxAge = TimeSpan.FromMinutes(_configuration.GetValue("KeywordCache:FreshCsvMaxAgeMinutes", 15));
+            var ready = status.IsReady(minFlatCount, freshCsvMaxAge);
 
             var body = new
             {
@@ -43,6 +43,8 @@ namespace ShotDeckSearch.Controllers
                 flatCount = status.FlatCount,
                 minFlatCount,
                 lastSuccessfulRefreshAt = status.LastSuccessfulRefreshAt,
+                csvSnapshotWrittenAt = status.CsvSnapshotWrittenAt,
+                servingFreshCsv = status.LastSuccessfulRefreshAt is null && status.LoadedFreshCsv(freshCsvMaxAge),
                 isRefreshRunning = status.IsRefreshRunning,
                 lastRefreshError = status.LastRefreshError is null ? null : status.LastRefreshError.Split('\n')[0]
             };
