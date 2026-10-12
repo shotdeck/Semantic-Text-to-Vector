@@ -30,6 +30,8 @@ namespace ShotDeck.Keywords
         string Canonicalize(string term);
         KeywordCacheStatus GetKeywordCacheStatus();
         Task RefreshAsync();
+        /// <summary>Starts a refresh without waiting for it. Returns false if one is already running.</summary>
+        bool TryStartRefreshInBackground();
         // Unwanted words methods - Dictionary maps phrase to is_super_blacklist
         IReadOnlyDictionary<string, bool> GetUnwantedWords();
         bool IsUnwantedWord(string word);
@@ -772,6 +774,13 @@ namespace ShotDeck.Keywords
                 _refreshGate.Release();
             }
         }
+        public bool TryStartRefreshInBackground()
+        {
+            if (!_refreshGate.Wait(0))
+                return false;
+            _ = RunBackgroundRefreshAsync();
+            return true;
+        }
         private async Task TriggerRefreshInBackground()
         {
             if (!_refreshGate.Wait(0))
@@ -779,6 +788,11 @@ namespace ShotDeck.Keywords
                 Console.WriteLine("[KeywordCache] Refresh already running; skip trigger.");
                 return;
             }
+            await RunBackgroundRefreshAsync().ConfigureAwait(false);
+        }
+        // Caller must already hold _refreshGate.
+        private async Task RunBackgroundRefreshAsync()
+        {
             try
             {
                 _lastRefreshStartAt = DateTimeOffset.UtcNow;

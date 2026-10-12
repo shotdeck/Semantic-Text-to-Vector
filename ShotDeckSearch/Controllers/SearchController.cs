@@ -1244,9 +1244,22 @@ namespace ShotDeckSearch.Controllers
             }
         }
 
+        /// <summary>
+        /// Reload the keyword cache from the database. With <c>wait=false</c>
+        /// the refresh runs in the background and this returns 202 at once;
+        /// poll <c>GET status</c> until <c>isRefreshRunning</c> is false
+        /// (deployment warm-up, where a synchronous call would outlive the
+        /// App Service request timeout).
+        /// </summary>
         [HttpPost("refresh")]
-        public async Task<IActionResult> Refresh()
+        public async Task<IActionResult> Refresh([FromQuery] bool wait = true)
         {
+            if (!wait)
+            {
+                var started = _keywordCache.TryStartRefreshInBackground();
+                return Accepted(new { started, status = _keywordCache.GetKeywordCacheStatus() });
+            }
+
             await _keywordCache.RefreshAsync();
             return Ok("Keyword cache refreshed.");
         }
