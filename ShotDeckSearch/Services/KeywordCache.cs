@@ -32,6 +32,8 @@ namespace ShotDeck.Keywords
         Task RefreshAsync();
         /// <summary>Starts a refresh without waiting for it. Returns false if one is already running.</summary>
         bool TryStartRefreshInBackground();
+        /// <summary>Loads the on-disk CSV snapshot if the cache is still empty, without starting a DB refresh.</summary>
+        bool WarmFromCsvIfEmpty();
         // Unwanted words methods - Dictionary maps phrase to is_super_blacklist
         IReadOnlyDictionary<string, bool> GetUnwantedWords();
         bool IsUnwantedWord(string word);
@@ -227,6 +229,7 @@ namespace ShotDeck.Keywords
         private Dictionary<string,
         List<string>> _keywordsByCategory = new(StringComparer.OrdinalIgnoreCase);
         private DateTimeOffset? _lastCsvWarmAt;
+        private readonly object _csvWarmLock = new();
         private DateTimeOffset? _lastRefreshStartAt;
         private DateTimeOffset? _lastRefreshEndAt;
         private bool _lastRefreshSucceeded;
@@ -746,19 +749,27 @@ namespace ShotDeck.Keywords
         private void EnsureWarmOrCsvThenBackgroundRefresh()
         {
             if (!ReferenceEquals(_snapshot, KeywordSnapshot.Empty)) return;
-            if (TryWarmFromCsv(out
-            var warmed))
-            {
-                Interlocked.Exchange(ref _snapshot, warmed);
-                _lastCsvWarmAt = DateTimeOffset.UtcNow;
-                PublishStatus();
-                Console.WriteLine($"[KeywordCacheService] CSV re-warm complete. Flat={warmed.FlatSet.Count}, Syn={warmed.SynonymToMaster.Count}");
-            }
-            else
-            {
-                Console.WriteLine("[KeywordCacheService] CSV re-warm unavailable; still Empty until refresh.");
-            }
+            WarmFromCsvIfEmpty();
             _ = TriggerRefreshInBackground();
+        }
+        public bool WarmFromCsvIfEmpty()
+        {
+            // One loader at a time, so a burst of requests on a cold process doesn't parse the CSVs once each.
+            lock (_csvWarmLock)
+            {
+                if (!ReferenceEquals(_snapshot, KeywordSnapshot.Empty)) return true;
+                if (TryWarmFromCsv(out
+                var warmed))
+                {
+                    Interlocked.Exchange(ref _snapshot, warmed);
+                    _lastCsvWarmAt = DateTimeOffset.UtcNow;
+                    PublishStatus();
+                    Console.WriteLine($"[KeywordCacheService] CSV re-warm complete. Flat={warmed.FlatSet.Count}, Syn={warmed.SynonymToMaster.Count}");
+                    return true;
+                }
+                Console.WriteLine("[KeywordCacheService] CSV re-warm unavailable; still Empty until refresh.");
+                return false;
+            }
         }
         public async Task RefreshAsync()
         {

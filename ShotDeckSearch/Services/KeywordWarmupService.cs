@@ -1,8 +1,10 @@
-﻿using Microsoft.Extensions.Hosting;
+﻿using System.Diagnostics;
+using Microsoft.Extensions.Hosting;
 using ShotDeck.Keywords;
 
-// Loads the keyword cache when the process starts instead of on the first request,
-// so a restart (e.g. Azure's restart after a slot swap) never serves an empty cache.
+// Hosted services start before the server takes requests, so loading the CSV snapshot here
+// means a restarted process (e.g. Azure's restart after a slot swap) serves a full cache from
+// its first request. The DB refresh then runs in the background once the tunnel is up.
 public class KeywordWarmupService : IHostedService
 {
     private static readonly TimeSpan TunnelWait = TimeSpan.FromMinutes(2);
@@ -19,20 +21,31 @@ public class KeywordWarmupService : IHostedService
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        _ = Task.Run(WarmAsync);
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            if (_keywordCache.WarmFromCsvIfEmpty())
+                Console.WriteLine($"✅ Keyword cache loaded from CSV snapshot in {sw.ElapsedMilliseconds}ms.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Failed to load keyword CSV snapshot: {ex.Message}");
+        }
+
+        _ = Task.Run(RefreshWhenTunnelReadyAsync);
         return Task.CompletedTask;
     }
 
-    private async Task WarmAsync()
+    private async Task RefreshWhenTunnelReadyAsync()
     {
         try
         {
-            // The DB refresh that follows the CSV warm needs the tunnel up, or it fails and stays CSV-only.
+            // A refresh started before the forward exists fails and leaves the cache CSV-only.
             await _tunnel.TunnelReady.WaitAsync(TunnelWait, _stopping.Token);
         }
         catch (TimeoutException)
         {
-            Console.WriteLine($"⚠️ SSH tunnel not ready after {TunnelWait.TotalSeconds:0}s; warming keyword cache anyway.");
+            Console.WriteLine($"⚠️ SSH tunnel not ready after {TunnelWait.TotalSeconds:0}s; refreshing keyword cache anyway.");
         }
         catch (OperationCanceledException)
         {
@@ -41,12 +54,13 @@ public class KeywordWarmupService : IHostedService
 
         try
         {
-            Console.WriteLine("🔁 Warming up keyword cache...");
-            _keywordCache.GetFlatKeywordSet();
+            Console.WriteLine("🔁 Refreshing keyword cache from database...");
+            if (!_keywordCache.TryStartRefreshInBackground())
+                Console.WriteLine("ℹ️ Keyword refresh already running.");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Failed to warm keyword cache: {ex.Message}");
+            Console.WriteLine($"❌ Failed to start keyword refresh: {ex.Message}");
         }
     }
 
