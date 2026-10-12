@@ -164,6 +164,9 @@ Write-Host "4/4 Swapping slot '$SlotName' into production..."
 az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production
 if ($LASTEXITCODE -ne 0) { throw "Slot swap failed (exit $LASTEXITCODE)." }
 
-$prod = Invoke-RestMethod -Uri "https://$WebAppName.azurewebsites.net/api/search/status" -TimeoutSec 60
-Write-Host "    production now serving flatCount=$($prod.flatCount) (lastRefreshEndAt=$($prod.lastRefreshEndAt))"
+$prod = Wait-Until "production readiness" $RefreshTimeoutSec {
+    $r = Invoke-RestMethod -Uri "https://$WebAppName.azurewebsites.net/api/health/ready" -TimeoutSec 30
+    if ($r.ready) { $r }
+}
+Write-Host "    production ready: flatCount=$($prod.flatCount) (lastSuccessfulRefreshAt=$($prod.lastSuccessfulRefreshAt))"
 Write-Host "Done."
