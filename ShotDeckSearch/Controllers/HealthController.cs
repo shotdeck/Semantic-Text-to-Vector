@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
+using ShotDeck.Keywords;
 
 namespace ShotDeckSearch.Controllers
 {
@@ -13,11 +14,39 @@ namespace ShotDeckSearch.Controllers
     {
         private readonly SshTunnelService _tunnel;
         private readonly IConfiguration _configuration;
+        private readonly IKeywordCacheService _keywordCache;
 
-        public HealthController(SshTunnelService tunnel, IConfiguration configuration)
+        public HealthController(SshTunnelService tunnel, IConfiguration configuration, IKeywordCacheService keywordCache)
         {
             _tunnel = tunnel;
             _configuration = configuration;
+            _keywordCache = keywordCache;
+        }
+
+        /// <summary>
+        /// 200 once the keyword cache has loaded from the database, 503 until then.
+        /// Azure's slot swap polls this (WEBSITE_SWAP_WARMUP_PING_PATH) so a
+        /// restarted process never takes production traffic on the CSV snapshot.
+        /// </summary>
+        [HttpGet("ready")]
+        public IActionResult GetReadiness()
+        {
+            // Touching the cache starts the CSV warm + background DB refresh in a fresh process.
+            _keywordCache.GetFlatKeywordSet();
+            var status = _keywordCache.GetKeywordCacheStatus();
+            var minFlatCount = _configuration.GetValue("Readiness:MinFlatCount", 1000);
+            var ready = status.IsReady(minFlatCount);
+
+            var body = new
+            {
+                ready,
+                flatCount = status.FlatCount,
+                minFlatCount,
+                lastSuccessfulRefreshAt = status.LastSuccessfulRefreshAt,
+                isRefreshRunning = status.IsRefreshRunning,
+                lastRefreshError = status.LastRefreshError is null ? null : status.LastRefreshError.Split('\n')[0]
+            };
+            return ready ? Ok(body) : StatusCode(StatusCodes.Status503ServiceUnavailable, body);
         }
 
         [HttpGet("db")]

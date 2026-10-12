@@ -111,6 +111,18 @@ namespace ShotDeck.Keywords
             get;
             init;
         }
+        public DateTimeOffset? LastSuccessfulRefreshAt
+        {
+            get;
+            init;
+        }
+
+        /// <summary>
+        /// True once this process has completed a database refresh with at least
+        /// <paramref name="minFlatCount"/> keywords. A CSV-only warm doesn't count.
+        /// </summary>
+        public bool IsReady(int minFlatCount) =>
+            LastSuccessfulRefreshAt is not null && FlatCount >= minFlatCount;
     }
     internal sealed class KeywordSnapshot
     {
@@ -218,6 +230,7 @@ namespace ShotDeck.Keywords
         private DateTimeOffset? _lastRefreshStartAt;
         private DateTimeOffset? _lastRefreshEndAt;
         private bool _lastRefreshSucceeded;
+        private DateTimeOffset? _lastSuccessfulRefreshAt;
         private string? _lastRefreshError;
         public event Action<KeywordCacheStatus>? StatusChanged;
         private void PublishStatus()
@@ -726,7 +739,8 @@ namespace ShotDeck.Keywords
                 CategoryCount = snap.KeywordsByCategory.Count,
                 SynonymCount = snap.SynonymToMaster.Count,
                 UnwantedWordsCount = snap.UnwantedWords.Count,
-                SuperBlacklistCount = snap.UnwantedWords.Count(kv => kv.Value)
+                SuperBlacklistCount = snap.UnwantedWords.Count(kv => kv.Value),
+                LastSuccessfulRefreshAt = _lastSuccessfulRefreshAt
             };
         }
         private void EnsureWarmOrCsvThenBackgroundRefresh()
@@ -758,6 +772,7 @@ namespace ShotDeck.Keywords
                 Console.WriteLine("[KeywordCache] Refresh (public) started…");
                 await RefreshCoreAsync().ConfigureAwait(false);
                 _lastRefreshSucceeded = true;
+                _lastSuccessfulRefreshAt = DateTimeOffset.UtcNow;
                 Console.WriteLine("[KeywordCache] Refresh (public) completed.");
             }
             catch (Exception ex)
@@ -802,6 +817,7 @@ namespace ShotDeck.Keywords
                 Console.WriteLine("[KeywordCache] Refresh (bg) started…");
                 await RefreshCoreAsync().ConfigureAwait(false);
                 _lastRefreshSucceeded = true;
+                _lastSuccessfulRefreshAt = DateTimeOffset.UtcNow;
                 Console.WriteLine("[KeywordCache] Refresh (bg) completed.");
             }
             catch (Exception ex)
