@@ -190,21 +190,23 @@ catch {
     az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production --action reset
     throw
 }
-Write-Host "    slot ready: flatCount=$($ready.flatCount) (lastSuccessfulRefreshAt=$($ready.lastSuccessfulRefreshAt))"
+Write-Host "    slot ready: flatCount=$($ready.flatCount) (lastSuccessfulRefreshAt=$($ready.lastSuccessfulRefreshAt), servingFreshCsv=$($ready.servingFreshCsv))"
 
 Write-Host "    phase 2: completing swap"
 az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production --action swap
 if ($LASTEXITCODE -ne 0) { throw "Completing the swap failed (exit $LASTEXITCODE)." }
 
+# Stop the old build straight away: Azure recycles it in the slot, and its startup would compete
+# with production for the plan's CPU.
+if (-not $LeaveSlotRunning) {
+    Write-Host "    stopping slot '$SlotName' (now the old build)"
+    az webapp stop --resource-group $ResourceGroup --name $WebAppName --slot $SlotName
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not stop slot '$SlotName' (exit $LASTEXITCODE); production is unaffected." }
+}
+
 $prod = Wait-Until "production readiness" $HealthTimeoutSec {
     $r = Invoke-RestMethod -Uri "https://$WebAppName.azurewebsites.net/api/health/ready" -TimeoutSec 30
     if ($r.ready) { $r }
 }
-Write-Host "    production ready: flatCount=$($prod.flatCount) (lastSuccessfulRefreshAt=$($prod.lastSuccessfulRefreshAt))"
-
-if (-not $LeaveSlotRunning) {
-    Write-Host "    stopping slot '$SlotName' so the old build doesn't compete with production for CPU"
-    az webapp stop --resource-group $ResourceGroup --name $WebAppName --slot $SlotName
-    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not stop slot '$SlotName' (exit $LASTEXITCODE); production is unaffected." }
-}
+Write-Host "    production ready: flatCount=$($prod.flatCount) (lastSuccessfulRefreshAt=$($prod.lastSuccessfulRefreshAt), servingFreshCsv=$($prod.servingFreshCsv), csvSnapshotWrittenAt=$($prod.csvSnapshotWrittenAt))"
 Write-Host "Done."
