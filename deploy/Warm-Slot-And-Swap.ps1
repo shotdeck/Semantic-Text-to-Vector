@@ -5,6 +5,7 @@
 
 .DESCRIPTION
     Run after the new build has been deployed to the slot. Steps:
+      0. Start the slot if it is stopped.
       1. Wait for the slot to answer GET /api/pipelinetest/health.
       2. Wait for GET /api/health/db to report the SSH tunnel + Postgres reachable.
       3. POST /api/search/refresh?wait=false, then poll GET /api/search/status
@@ -53,6 +54,15 @@ function Wait-Until {
 }
 
 Write-Host "Slot URL: $SlotBaseUrl"
+
+# A stopped slot can't warm up, and the swap fails 409 ("one of the slots is in a stopped state").
+$state = az webapp show --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --query state -o tsv
+if ($LASTEXITCODE -ne 0) { throw "Could not read state of slot '$SlotName' (exit $LASTEXITCODE)." }
+if ($state -ne 'Running') {
+    Write-Host "Slot '$SlotName' is $state; starting it..."
+    az webapp start --resource-group $ResourceGroup --name $WebAppName --slot $SlotName
+    if ($LASTEXITCODE -ne 0) { throw "Could not start slot '$SlotName' (exit $LASTEXITCODE)." }
+}
 
 Write-Host "1/4 Waiting for slot to come up..."
 Wait-Until "slot health" $HealthTimeoutSec {

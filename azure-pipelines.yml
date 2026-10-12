@@ -75,6 +75,16 @@ stages:
           - download: current
             artifact: drop
 
+          - task: AzureAppServiceManage@0
+            displayName: 'Start $(slotName) slot'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              Action: 'Start Azure App Service'
+              WebAppName: '$(webAppName)'
+              SpecifySlotOrASE: true
+              ResourceGroupName: '$(resourceGroup)'
+              Slot: '$(slotName)'
+
           - task: AzureWebApp@1
             displayName: 'Deploy to $(slotName) slot'
             inputs:
