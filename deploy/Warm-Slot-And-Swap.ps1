@@ -16,6 +16,9 @@
       4. Swap with preview (skipped with -NoSwap): apply production's settings
          to the slot (Azure restarts it), wait for GET /api/health/ready on the
          restarted slot, then complete the swap. Cancels the swap on timeout.
+      5. Stop the slot (skipped with -LeaveSlotRunning). It now holds the old
+         build, and it shares production's App Service plan, so its restart and
+         database refresh would otherwise slow production down.
 
     Requires an authenticated Azure CLI (an AzureCLI@2 task in the release
     pipeline provides this). Exits non-zero on any failure so the release
@@ -36,7 +39,8 @@ param(
     [int] $PollIntervalSec = 10,
     [int] $MinFlatCount = 1000,
     [switch] $NoSwap,
-    [switch] $SkipSettingsSync
+    [switch] $SkipSettingsSync,
+    [switch] $LeaveSlotRunning
 )
 
 $ErrorActionPreference = 'Stop'
@@ -197,4 +201,10 @@ $prod = Wait-Until "production readiness" $HealthTimeoutSec {
     if ($r.ready) { $r }
 }
 Write-Host "    production ready: flatCount=$($prod.flatCount) (lastSuccessfulRefreshAt=$($prod.lastSuccessfulRefreshAt))"
+
+if (-not $LeaveSlotRunning) {
+    Write-Host "    stopping slot '$SlotName' so the old build doesn't compete with production for CPU"
+    az webapp stop --resource-group $ResourceGroup --name $WebAppName --slot $SlotName
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Could not stop slot '$SlotName' (exit $LASTEXITCODE); production is unaffected." }
+}
 Write-Host "Done."
