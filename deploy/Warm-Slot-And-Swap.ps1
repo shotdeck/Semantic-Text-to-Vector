@@ -13,7 +13,9 @@
       2. Wait for GET /api/health/db to report the SSH tunnel + Postgres reachable.
       3. POST /api/search/refresh?wait=false, then poll GET /api/search/status
          until the refresh finishes; fail if it errored or loaded nothing.
-      4. az webapp deployment slot swap  (skipped with -NoSwap)
+      4. Swap with preview (skipped with -NoSwap): apply production's settings
+         to the slot (Azure restarts it), wait for GET /api/health/ready on the
+         restarted slot, then complete the swap. Cancels the swap on timeout.
 
     Requires an authenticated Azure CLI (an AzureCLI@2 task in the release
     pipeline provides this). Exits non-zero on any failure so the release
@@ -160,11 +162,37 @@ if ($NoSwap) {
     exit 0
 }
 
-Write-Host "4/4 Swapping slot '$SlotName' into production..."
-az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production
-if ($LASTEXITCODE -ne 0) { throw "Slot swap failed (exit $LASTEXITCODE)." }
+# Azure's own swap warm-up stops the swap on the first non-listed status, so
+# it can't wait for a slow cache load; swap with preview lets us wait instead.
+$pingStatuses = az webapp config appsettings list --resource-group $ResourceGroup --name $WebAppName --query "[?name=='WEBSITE_SWAP_WARMUP_PING_STATUSES'].value" -o tsv
+if ($LASTEXITCODE -ne 0) { throw "Could not read production app settings (exit $LASTEXITCODE)." }
+if ($pingStatuses) {
+    throw "Production has WEBSITE_SWAP_WARMUP_PING_STATUSES=$pingStatuses; Azure aborts the swap while the restarted slot answers 503. Delete WEBSITE_SWAP_WARMUP_PING_PATH and WEBSITE_SWAP_WARMUP_PING_STATUSES from production."
+}
 
-$prod = Wait-Until "production readiness" $RefreshTimeoutSec {
+Write-Host "4/4 Swapping slot '$SlotName' into production (with preview)..."
+Write-Host "    phase 1: applying production settings to '$SlotName' (restarts it)"
+az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production --action preview
+if ($LASTEXITCODE -ne 0) { throw "Swap preview failed (exit $LASTEXITCODE)." }
+
+try {
+    $ready = Wait-Until "slot readiness after restart" $RefreshTimeoutSec {
+        $r = Invoke-RestMethod -Uri "$SlotBaseUrl/api/health/ready" -TimeoutSec 30
+        if ($r.ready) { $r }
+    }
+}
+catch {
+    Write-Host "    slot never became ready; cancelling the swap"
+    az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production --action reset
+    throw
+}
+Write-Host "    slot ready: flatCount=$($ready.flatCount) (lastSuccessfulRefreshAt=$($ready.lastSuccessfulRefreshAt))"
+
+Write-Host "    phase 2: completing swap"
+az webapp deployment slot swap --resource-group $ResourceGroup --name $WebAppName --slot $SlotName --target-slot production --action swap
+if ($LASTEXITCODE -ne 0) { throw "Completing the swap failed (exit $LASTEXITCODE)." }
+
+$prod = Wait-Until "production readiness" $HealthTimeoutSec {
     $r = Invoke-RestMethod -Uri "https://$WebAppName.azurewebsites.net/api/health/ready" -TimeoutSec 30
     if ($r.ready) { $r }
 }
